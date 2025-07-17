@@ -9,7 +9,8 @@ import typing
 from pathlib import Path
 from typing import Any, Callable
 
-import digitalhub as dh
+from digitalhub.entities.project.crud import get_project
+from digitalhub.entities.run.crud import get_run
 from digitalhub.context.api import get_context
 from digitalhub.runtimes.enums import RuntimeEnvVar
 from digitalhub_runtime_python.utils.configuration import import_function_and_init_from_source
@@ -65,14 +66,14 @@ def init_context(context: Context) -> None:
 
     # Get project
     project_name = os.getenv(RuntimeEnvVar.PROJECT.value)
-    project = dh.get_project(project_name)
+    project = get_project(project_name)
 
     # Set root directory from context
     ctx = get_context(project.name)
     ctx.root.mkdir(parents=True, exist_ok=True)
 
     # Get run
-    run: RunPythonRun = dh.get_run(os.getenv(RuntimeEnvVar.RUN_ID.value), project=project_name)
+    run: RunPythonRun = get_run(os.getenv(RuntimeEnvVar.RUN_ID.value), project=project_name)
 
     # Set running context
     context.logger.info("Starting execution.")
