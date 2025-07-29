@@ -10,10 +10,21 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Extract branch name
+        id: extract_branch
+        run: |
+          branch_ref="${{ github.event.client_payload.branch }}"
+          if [[ $branch_ref == refs/heads/* ]]; then
+            branch_name=${branch_ref#refs/heads/}
+          else
+            branch_name=${branch_ref}
+          fi
+          echo "branch_name=${branch_name}" >> $GITHUB_OUTPUT
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.client_payload.branch }}
+          ref: ${{ steps.extract_branch.outputs.branch_name || 'main' }}
 
       # Update Dockerfile line
       - name: Update Dockerfile
