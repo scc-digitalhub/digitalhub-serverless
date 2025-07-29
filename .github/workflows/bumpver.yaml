@@ -10,6 +10,14 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Print incoming payload
+        run: |
+          echo "=== Incoming Repository Dispatch Payload ==="
+          echo "lib_name: ${{ github.event.client_payload.lib_name }}"
+          echo "lib_vers: ${{ github.event.client_payload.lib_vers }}"
+          echo "branch: ${{ github.event.client_payload.branch }}"
+          echo "=============================================="
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
