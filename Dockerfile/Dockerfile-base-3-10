@@ -35,3 +35,5 @@ RUN python -m pip install "digitalhub[full]==${ver_sdk}" \
 
 RUN useradd -r -m -u 8877 nonroot
 USER 8877
+
+WORKDIR /shared
