@@ -27,6 +27,11 @@ jobs:
             tag: 3.11-${{ github.event.release.tag_name }}
             latest: 3.11-latest
             context: ./
+          - dockerfile: ./Dockerfile/Dockerfile-base-3-12
+            image: ghcr.io/${{ github.repository }}/python-base
+            tag: 3.12-${{ github.event.release.tag_name }}
+            latest: 3.12-latest
+            context: ./
     permissions:
       contents: read
       packages: write
@@ -72,6 +77,11 @@ jobs:
             image: ghcr.io/${{ github.repository }}/python-onbuild
             tag: 3.11-${{ github.event.release.tag_name }}
             latest: 3.11-latest
+            context: ./
+          - dockerfile: ./Dockerfile/Dockerfile-onbuild-3-12
+            image: ghcr.io/${{ github.repository }}/python-onbuild
+            tag: 3.12-${{ github.event.release.tag_name }}
+            latest: 3.12-latest
             context: ./
     permissions:
       contents: read
@@ -121,6 +131,11 @@ jobs:
             image: ghcr.io/${{ github.repository }}/python-runtime
             tag: 3.11-${{ github.event.release.tag_name }}
             latest: 3.11-latest
+            context: ./
+          - dockerfile: ./Dockerfile/Dockerfile-handler-3-12
+            image: ghcr.io/${{ github.repository }}/python-runtime
+            tag: 3.12-${{ github.event.release.tag_name }}
+            latest: 3.12-latest
             context: ./
     permissions:
       contents: read
