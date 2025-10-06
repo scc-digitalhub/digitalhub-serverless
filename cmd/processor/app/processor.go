@@ -65,6 +65,7 @@ import (
 	_ "github.com/nuclio/nuclio/pkg/processor/trigger/pubsub"
 	_ "github.com/nuclio/nuclio/pkg/processor/trigger/rabbitmq"
 	_ "github.com/nuclio/nuclio/pkg/processor/trigger/v3iostream"
+	_ "github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/trigger/extproc"
 	_ "github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/trigger/job"
 
 	// load all sinks
