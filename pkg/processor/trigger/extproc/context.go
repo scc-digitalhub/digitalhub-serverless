@@ -104,6 +104,14 @@ func initReqCtx(rc *RequestContext, headers *AllHeaders) error {
 	return nil
 }
 
+func (rc *RequestContext) HasBody() bool {
+	contentLength, clErr := rc.AllHeaders.GetHeaderValueAsString("content-length")
+	if clErr != nil || contentLength == "" || contentLength == "0" {
+		return false
+	}
+	return true
+}
+
 // Internal method to append body chunks when buffering streaming bodies
 func (rc *RequestContext) appendBodyChunk(chunk []byte) error {
 	return rc.bodybuffer.AppendChunk(chunk)
@@ -220,7 +228,7 @@ func (rc *RequestContext) CancelRequest(status int32, headers map[string]HeaderV
 			Code: typev3.StatusCode(status),
 		},
 		Headers: rc.response.headerMutation,
-		Body:    string(body),
+		Body:    body,
 	}
 	return nil
 }
@@ -332,7 +340,7 @@ func (rc *RequestContext) UpdateHeader(name string, hv HeaderValue, action strin
 		corev3.HeaderValueOption_HeaderAppendAction_value[action],
 	)
 	h := &corev3.HeaderValueOption{
-		Header:       &corev3.HeaderValue{Key: name, Value: hv.Value},
+		Header:       &corev3.HeaderValue{Key: name, Value: hv.Value, RawValue: hv.RawValue},
 		AppendAction: aa,
 	}
 	hm.SetHeaders = append(hm.SetHeaders, h)
@@ -366,7 +374,7 @@ func (rc *RequestContext) UpdateHeaders(headers map[string]HeaderValue, action s
 			return fmt.Errorf("only one of 'value' or 'raw_value' can be set")
 		}
 		h := &corev3.HeaderValueOption{
-			Header:       &corev3.HeaderValue{Key: k, Value: v.Value},
+			Header:       &corev3.HeaderValue{Key: k, Value: v.Value, RawValue: v.RawValue},
 			AppendAction: aa,
 		}
 		hm.SetHeaders = append(hm.SetHeaders, h)
@@ -474,7 +482,7 @@ func (rc *RequestContext) parseStatusFromResponseHeaders(headers AllHeaders) err
 
 	rc.Status = uint16(0)
 
-	statusStrVals, statusBytes, exists := headers.GetHeaderValue(":status")
+	statusStrVal, statusBytes, exists := headers.GetHeaderValue(":status")
 	if !exists {
 		return errors.New("no :status header exists in AllHeaders passed")
 	}
@@ -492,8 +500,8 @@ func (rc *RequestContext) parseStatusFromResponseHeaders(headers AllHeaders) err
 		return nil
 	}
 
-	if len(statusStrVals) > 0 {
-		statusStr := statusStrVals[0] // take first, only first
+	if statusStrVal != nil {
+		statusStr := *statusStrVal
 		statusInt, err = strconv.ParseInt(statusStr, 0, 16)
 		if err != nil {
 			return err

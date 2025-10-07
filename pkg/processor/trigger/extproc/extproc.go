@@ -13,6 +13,10 @@ import (
 	extprocv3 "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 )
 
+const (
+	ProcessingPhaseHeader string = "processing-phase"
+)
+
 // Primary interface for supported request processing that SDK users must
 // implement, passing a complying type to `GenericExtProcServer` or `Serve`.
 //
@@ -183,6 +187,7 @@ func (s *GenericExtProcServer) processPhase(procReq *extprocv3.ProcessingRequest
 
 		// TODO: err check, but what is an error?
 		ah, _ := NewAllHeadersFromEnvoyHeaderMap(h.Headers)
+		ah.Headers[ProcessingPhaseHeader] = strconv.Itoa(phase)
 
 		// initialize request context (requires _not_ skipping request headers)
 		_ = initReqCtx(rc, &ah)
@@ -214,6 +219,7 @@ func (s *GenericExtProcServer) processPhase(procReq *extprocv3.ProcessingRequest
 		}
 		b := req.RequestBody
 		rc.EndOfStream = b.EndOfStream
+		rc.AllHeaders.Headers[ProcessingPhaseHeader] = strconv.Itoa(phase)
 
 		ps = time.Now()
 		err = rc.handleBodyChunk(processor.ProcessRequestBody, s.options, b.Body)
@@ -228,6 +234,7 @@ func (s *GenericExtProcServer) processPhase(procReq *extprocv3.ProcessingRequest
 
 		// TODO: err check, but what is an error?
 		trailers, _ := NewAllHeadersFromEnvoyHeaderMap(ts.Trailers)
+		rc.AllHeaders.Headers[ProcessingPhaseHeader] = strconv.Itoa(phase)
 
 		ps = time.Now()
 		err = processor.ProcessRequestTrailers(rc, trailers)
@@ -240,6 +247,7 @@ func (s *GenericExtProcServer) processPhase(procReq *extprocv3.ProcessingRequest
 		}
 		hs := req.ResponseHeaders
 		rc.EndOfStream = hs.EndOfStream
+		rc.AllHeaders.Headers[ProcessingPhaseHeader] = strconv.Itoa(phase)
 
 		// _response_ headers
 
@@ -275,6 +283,7 @@ func (s *GenericExtProcServer) processPhase(procReq *extprocv3.ProcessingRequest
 		}
 		b := req.ResponseBody
 		rc.EndOfStream = b.EndOfStream
+		rc.AllHeaders.Headers[ProcessingPhaseHeader] = strconv.Itoa(phase)
 
 		ps = time.Now()
 		err = rc.handleBodyChunk(processor.ProcessResponseBody, s.options, b.Body)

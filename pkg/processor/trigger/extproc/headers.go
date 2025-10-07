@@ -17,7 +17,7 @@ type HeaderValue struct {
 // Internal structure for storing headers received from envoy, as either
 // multi-string-valued lists or raw bytes.
 type AllHeaders struct {
-	Headers    map[string][]string
+	Headers    map[string]string
 	RawHeaders map[string][]byte
 }
 
@@ -26,15 +26,17 @@ type HeaderNameFilter func(string) bool
 
 // Create an `AllHeaders` struct from envoy-formatted headers.
 func NewAllHeadersFromEnvoyHeaderMap(headerMap *corev3.HeaderMap) (headers AllHeaders, err error) {
-	headers = AllHeaders{map[string][]string{}, map[string][]byte{}}
+	headers = AllHeaders{map[string]string{}, map[string][]byte{}}
 
-	for _, h := range headerMap.Headers {
+	for _, h := range headerMap.GetHeaders() {
 
 		if len(h.Value) > 0 {
-			headers.Headers[h.Key] = strings.Split(h.Value, ",")
+			headers.Headers[h.Key] = h.Value
+		} else {
+			headers.RawHeaders[h.Key] = h.RawValue
 		}
 	}
-	return
+	return headers, nil
 }
 
 // "Stringify" all headers, meaning convert the headers to a simplified
@@ -43,7 +45,7 @@ func NewAllHeadersFromEnvoyHeaderMap(headerMap *corev3.HeaderMap) (headers AllHe
 func (h *AllHeaders) Stringify() map[string]string {
 	headers := make(map[string]string)
 	for name, val := range h.Headers {
-		headers[name] = strings.Join(val, ", ")
+		headers[name] = val
 	}
 	for name, val := range h.RawHeaders {
 		if utf8.Valid(val) {
@@ -56,9 +58,9 @@ func (h *AllHeaders) Stringify() map[string]string {
 }
 
 // Get header values by name as either list of strings or raw bytes
-func (h *AllHeaders) GetHeaderValue(name string) ([]string, []byte, bool) {
+func (h *AllHeaders) GetHeaderValue(name string) (*string, []byte, bool) {
 	if value, exists := h.Headers[name]; exists {
-		return value, nil, true
+		return &value, nil, true
 	}
 	if value, exists := h.RawHeaders[name]; exists {
 		return nil, value, true
@@ -74,7 +76,7 @@ func (h *AllHeaders) GetHeaderValueAsString(name string) (string, error) {
 		return "", errors.New("header does not exist")
 	}
 	if sv != nil {
-		s := strings.Join(sv, ", ")
+		s := *sv
 		return s, nil
 	}
 	if bv != nil {
@@ -85,30 +87,6 @@ func (h *AllHeaders) GetHeaderValueAsString(name string) (string, error) {
 		return b64.StdEncoding.EncodeToString(bv), errors.New("bytes-valued header is not valid utf8")
 	}
 	return "", errors.New("unexpected state encountered retrieving header value")
-}
-
-// Get header values by name, if it exists, as a list of string
-func (h *AllHeaders) GetHeaderValueAsStringList(name string) ([]string, error) {
-	sv, bv, exists := h.GetHeaderValue(name)
-	if !exists {
-		return nil, errors.New("header does not exist")
-	}
-	if sv != nil {
-		return sv, nil
-	}
-	if bv != nil {
-		if utf8.Valid(bv) {
-			csv := string(bv)
-			values := strings.Split(csv, ",")
-			for v := range values {
-				values[v] = strings.TrimSpace(values[v])
-			}
-			return values, nil
-		}
-		// Note, we return the bytes base64 encoded, not an empty string
-		return nil, errors.New("bytes-valued header is not valid utf8")
-	}
-	return nil, errors.New("unexpected state encountered retrieving header value")
 }
 
 // Drop, in-place, the header with a given name if it exists
@@ -166,7 +144,7 @@ func (h *AllHeaders) DropHeadersNamedEndingWith(suffix string) {
 // Clone a set of headers, convenience for copying in case in-place
 // methods above are too destructive for use in a given implementation.
 func (h *AllHeaders) Clone() *AllHeaders {
-	copy := AllHeaders{map[string][]string{}, map[string][]byte{}}
+	copy := AllHeaders{map[string]string{}, map[string][]byte{}}
 	for name, val := range h.Headers {
 		copy.Headers[name] = val
 	}

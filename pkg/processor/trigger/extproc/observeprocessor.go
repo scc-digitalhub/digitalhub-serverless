@@ -28,11 +28,12 @@ func (s *ObserveProcessor) GetName() string {
 }
 
 func (s *ObserveProcessor) ProcessRequestHeaders(ctx *RequestContext, headers AllHeaders) error {
-	// TODO: not needed if ProcessRequestBody always called
-	// err := observeRequest(ctx, nil)
-	// if err != nil {
-	// 	log.Printf("Error: %v", err)
-	// }
+	if !ctx.HasBody() {
+		err := s.observeRequest(ctx, nil)
+		if err != nil {
+			log.Printf("Error: %v", err)
+		}
+	}
 	return ctx.ContinueRequest()
 }
 
@@ -45,11 +46,6 @@ func (s *ObserveProcessor) ProcessRequestBody(ctx *RequestContext, body []byte) 
 }
 
 func (s *ObserveProcessor) ProcessResponseHeaders(ctx *RequestContext, headers AllHeaders) error {
-	// TODO: not needed if ProcessResponseBody always called
-	// _, err := observeResponse(ctx, nil)
-	// if err != nil {
-	// 	log.Printf("Error: %v", err)
-	// }
 	return ctx.ContinueRequest()
 }
 

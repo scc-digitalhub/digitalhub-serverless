@@ -27,11 +27,6 @@ func (s *PostProcessor) GetName() string {
 }
 
 func (s *PostProcessor) ProcessResponseHeaders(ctx *RequestContext, headers AllHeaders) error {
-	// TODO: not needed if ProcessResponseBody always called
-	// _, err := processResponse(ctx, nil)
-	// if err != nil {
-	// 	log.Printf("Error: %v", err)
-	// }
 	return ctx.ContinueRequest()
 }
 

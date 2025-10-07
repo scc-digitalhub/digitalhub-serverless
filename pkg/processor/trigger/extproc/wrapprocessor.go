@@ -57,13 +57,15 @@ func (s *WrapProcessor) GetName() string {
 }
 
 func (s *WrapProcessor) ProcessRequestHeaders(ctx *RequestContext, headers AllHeaders) error {
-	// TODO: not needed if ProcessRequestBody always called
-	// _, err, res := wrapRequest(ctx, nil)
-	// if err != nil {
-	// 	log.Printf("Error: %v", err)
-	// } else if res != nil {
-	// 	return ctx.CancelRequest(res.Status, res.Headers, res.Body)
-	// }
+	if !ctx.HasBody() {
+		_, res, err := s.wrapRequest(ctx, nil)
+		if err != nil {
+			log.Printf("Error: %v", err)
+		} else if res != nil {
+			return ctx.CancelRequest(res.Status, res.Headers, res.Body)
+		}
+	}
+
 	return ctx.ContinueRequest()
 }
 
@@ -80,11 +82,6 @@ func (s *WrapProcessor) ProcessRequestBody(ctx *RequestContext, body []byte) err
 }
 
 func (s *WrapProcessor) ProcessResponseHeaders(ctx *RequestContext, headers AllHeaders) error {
-	// TODO: not needed if ProcessResponseBody always called
-	// _, err := wrapResponse(ctx, nil)
-	// if err != nil {
-	// 	log.Printf("Error: %v", err)
-	// }
 	return ctx.ContinueRequest()
 }
 

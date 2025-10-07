@@ -47,6 +47,9 @@ func newTrigger(logger logger.Logger,
 		AbstractTrigger: abstractTrigger,
 		configuration:   configuration,
 		status:          status.Initializing,
+		activeContexts:  make([]*Event, numWorkers),
+		timeouts:        make([]uint64, numWorkers),
+		answering:       make([]uint64, numWorkers),
 	}
 
 	newTrigger.Trigger = &newTrigger
@@ -136,10 +139,10 @@ func (ep *extproc) AllocateWorkerAndSubmitEvent(req *Event,
 	ep.answering[workerIndex] = 0
 	event := &ep.events[workerIndex]
 	event.ctx = req.ctx
+	event.Body = req.Body
 
 	// submit to worker
 	response, processError = ep.SubmitEventToWorker(functionLogger, workerInstance, event)
-
 	// release worker when we're done
 	ep.WorkerAllocator.Release(workerInstance)
 
@@ -178,7 +181,8 @@ func (ep *extproc) handleRequest(ctx *RequestContext, body []byte) (*nuclio.Resp
 	var functionLogger logger.Logger
 
 	event := Event{
-		ctx: ctx,
+		ctx:  ctx,
+		Body: body,
 	}
 
 	response, timedOut, submitError, processError := ep.AllocateWorkerAndSubmitEvent(&event,
@@ -211,6 +215,19 @@ func (ep *extproc) handleRequest(ctx *RequestContext, body []byte) (*nuclio.Resp
 	// format the response into the context, based on its type
 	switch typedResponse := response.(type) {
 	case nuclio.Response:
+		// if the response contains a processing status, use it as the response status code ignoring the status code which is default 200
+		if typedResponse.Headers != nil {
+			val, ok := typedResponse.Headers["X-Processing-Status"]
+			if !ok {
+				typedResponse.StatusCode = 0
+			} else {
+				delete(typedResponse.Headers, "X-Processing-Status")
+				status, statusErr := strconv.Atoi(string(val.(string)))
+				if statusErr == nil {
+					typedResponse.StatusCode = status
+				}
+			}
+		}
 		return &typedResponse, nil
 
 	case []byte:

@@ -17,7 +17,8 @@ import (
 // allows accessing fasthttp.RequestCtx as a event.Sync
 type Event struct {
 	nuclio.AbstractEvent
-	ctx *RequestContext
+	ctx  *RequestContext
+	Body []byte
 }
 
 // GetContentType returns the content type of the body
@@ -27,7 +28,7 @@ func (e *Event) GetContentType() string {
 
 // GetBody returns the body of the event
 func (e *Event) GetBody() []byte {
-	return e.ctx.CurrentBodyBytes()
+	return e.Body
 }
 
 // GetHeaderByteSlice returns the header by name as a byte slice
@@ -47,7 +48,7 @@ func (e *Event) GetHeader(key string) interface{} {
 func (e *Event) GetHeaders() map[string]interface{} {
 	headers := make(map[string]interface{})
 	for key, value := range e.ctx.AllHeaders.Headers {
-		headers[string(key)] = strings.Join(value, ",")
+		headers[string(key)] = value
 	}
 	return headers
 }

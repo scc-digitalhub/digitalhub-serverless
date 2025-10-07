@@ -10,7 +10,7 @@ spec:
     extproc:
       kind: extproc
       attributes:
-        type: preprocessor 
+        type: wrapprocessor 
         port: 5051
         gracefulShutdownTimeout: 5
         maxConcurrentStreams: 100
@@ -19,8 +19,7 @@ spec:
           logPhases: false
           updateExtprocHeader: false
           updateDurationHeader: false
-          requestIdHeaderName: "x-request-id"
-          requestIdFallback: "1234"
+          requestIdHeaderName: x-request-id
           bufferStreamedBodies: true
           perRequestBodyBufferBytes: 102400
           decompressBodies: true

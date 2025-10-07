@@ -27,11 +27,13 @@ func (s *PreProcessor) GetName() string {
 }
 
 func (s *PreProcessor) ProcessRequestHeaders(ctx *RequestContext, headers AllHeaders) error {
-	// TODO: not needed if ProcessRequestBody always called
-	// _, err := processRequest(ctx, nil)
-	// if err != nil {
-	// 	log.Printf("Error: %v", err)
-	// }
+	if !ctx.HasBody() {
+		_, err := s.processRequest(ctx, nil)
+		if err != nil {
+			log.Printf("Error: %v", err)
+		}
+	}
+
 	return ctx.ContinueRequest()
 }
 
