@@ -3,7 +3,11 @@
 [![license](https://img.shields.io/badge/license-Apache%202.0-blue)](https://github.com/scc-digitalhub/digitalhub-core/LICENSE) ![GitHub Release](https://img.shields.io/github/v/release/scc-digitalhub/digitalhub-serverless)
 ![Status](https://img.shields.io/badge/status-stable-gold)
 
-Nuclio "Serverless"-based framework for Job/serverless executions compatible with DH Core. The product is a set of python images that can be used to run serverless jobs in a Kubernetes cluster.
+Nuclio "Serverless"-based framework for Job/serverless executions compatible with DH Core. The product is a set of python images that can be used to run 
+- serverless jobs in a Kubernetes cluster.
+- functions as APIs in a Kubernetes cluster
+- traffic processing tasks as extensions (``ext_proc``) to Envoy proxy as a service sidecar or standalone.
+
 
 ## Development
 
