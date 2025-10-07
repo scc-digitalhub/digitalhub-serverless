@@ -18,10 +18,11 @@ from digitalhub_runtime_python.utils.inputs import compose_init, compose_inputs
 from digitalhub_runtime_python.utils.outputs import build_status, parse_outputs
 
 if typing.TYPE_CHECKING:
-    from digitalhub_runtime_python.entities.run.python_run.entity import RunPythonRun
+    from digitalhub_runtime_python.entities.run._base.entity import RunPythonRun
     from nuclio_sdk import Context, Event, Response
 
 
+DEFAULT_PATH = Path("/shared")
 DEFAULT_PY_FILE = "main.py"
 
 
@@ -87,9 +88,8 @@ def init_context(context: Context) -> None:
     # user dir (will be taken from run spec in the future),
     # default_py_file filename is "main.py", source is the
     # function source
-    path = Path("/shared")
     source = run.spec.to_dict().get("source")
-    func, init_function = import_function_and_init_from_source(path, source, DEFAULT_PY_FILE)
+    func, init_function = import_function_and_init_from_source(DEFAULT_PATH, source, DEFAULT_PY_FILE)
 
     # Set attributes
     setattr(context, "project", project)
