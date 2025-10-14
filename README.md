@@ -21,7 +21,13 @@ Clone the repository and navigate to the `digitalhub-serverless` directory. The 
 make processor
 ```
 
-- Build the onbuild image (chooses the Python version from 3.9, 3.10, or 3.11. Modify the `Dockerfile/Dockerfile-onbuild-3-<ver>` file to change the SERVERLESS_DOCKER_REP variable to your Docker repository, e.g., `docker.io/yourusername`)
+- Build the base image (chooses the Python version from 3.9, 3.10, 3.11 or 3.12)
+
+```bash
+docker build -t python-base-3-<ver> -f ./Dockerfile/Dockerfile-base-3-<ver> -e =<ver> .
+```
+
+- Build the onbuild image (Modify the `Dockerfile/Dockerfile-onbuild-3-<ver>` file to change the SERVERLESS_DOCKER_REP variable to your Docker repository, e.g., `docker.io/yourusername`)
 
 ```bash
 docker build -t python-onbuild-3-<ver> -f ./Dockerfile/Dockerfile-onbuild-3-<ver> -e =<ver> .
