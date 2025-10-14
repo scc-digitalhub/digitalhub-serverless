@@ -38,10 +38,6 @@ def execute_user_init(init_function: Callable, context: Context, run: RunPythonR
         Nuclio context.
     run : RunPythonRun
         Run entity.
-
-    Returns
-    -------
-    None
     """
     init_params: dict = run.spec.to_dict().get("init_parameters", {})
     params = compose_init(init_function, context, init_params)
@@ -58,10 +54,6 @@ def init_context(context: Context) -> None:
     ----------
     context : Context
         Nuclio context.
-
-    Returns
-    -------
-    None
     """
     context.logger.info("Initializing context...")
 
