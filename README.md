@@ -4,8 +4,8 @@
 ![Status](https://img.shields.io/badge/status-stable-gold)
 
 Nuclio "Serverless"-based framework for Job/serverless executions compatible with DH Core. The product is a set of python images that can be used to run 
-- serverless jobs in a Kubernetes cluster.
-- functions as APIs in a Kubernetes cluster
+- serverless jobs in a Kubernetes cluster (``job`` trigger).
+- functions as APIs in a Kubernetes cluster (based on Nuclio ``http`` trigger).
 - traffic processing tasks as extensions (``ext_proc``) to Envoy proxy as a service sidecar or standalone.
 
 

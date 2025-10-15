@@ -166,6 +166,7 @@ func (b *EncodedBody) DecompressBody() error {
 			return errors.New("gzip decompression failed")
 		}
 		b.Value = unzipped
+		b.Decompressed = true
 		return nil
 	}
 

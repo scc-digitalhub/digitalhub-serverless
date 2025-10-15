@@ -58,7 +58,7 @@ func Serve(port int, processor RequestProcessor) {
 // with this SDK.
 func ServeWithOptions(port int, serverOpts ExtProcServerOptions, processor RequestProcessor) {
 	if processor == nil {
-		log.Fatalf("cannot process request stream without `processor`")
+		panic("cannot process request stream without `processor`")
 	}
 
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(port))

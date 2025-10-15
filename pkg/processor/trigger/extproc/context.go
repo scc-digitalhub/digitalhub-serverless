@@ -342,6 +342,10 @@ func (rc *RequestContext) UpdateHeader(name string, hv HeaderValue, action strin
 		return fmt.Errorf("only one of 'value' or 'raw_value' can be set")
 	}
 	hm := rc.response.headerMutation
+	if hm == nil {
+		hm = &extprocv3.HeaderMutation{}
+		rc.response.headerMutation = hm
+	}
 	aa := corev3.HeaderValueOption_HeaderAppendAction(
 		corev3.HeaderValueOption_HeaderAppendAction_value[action],
 	)

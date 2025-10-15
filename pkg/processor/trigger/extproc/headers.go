@@ -88,8 +88,8 @@ func (h *AllHeaders) GetHeaderValueAsString(name string) (string, error) {
 		if utf8.Valid(bv) {
 			return string(bv), nil
 		}
-		// Note, we return the bytes base64 encoded, not an empty string
-		return b64.StdEncoding.EncodeToString(bv), errors.New("bytes-valued header is not valid utf8")
+		// For non-UTF8 data, return base64 encoded string without error
+		return b64.StdEncoding.EncodeToString(bv), nil
 	}
 	return "", errors.New("unexpected state encountered retrieving header value")
 }

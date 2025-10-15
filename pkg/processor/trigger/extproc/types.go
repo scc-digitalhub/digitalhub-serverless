@@ -47,7 +47,15 @@ func NewConfiguration(id string,
 
 	// parse attributes
 	if err := mapstructure.Decode(newConfiguration.Configuration.Attributes, &newConfiguration); err != nil {
-		return nil, errors.Wrap(err, "Failed to decode attributes")
+		return nil, errors.Wrap(err, "Failed to decode trigger configuration")
+	}
+
+	// validate required fields
+	if newConfiguration.Type == "" {
+		return nil, errors.New("Operator type not specified")
+	}
+	if newConfiguration.Port == 0 {
+		return nil, errors.New("Port not specified")
 	}
 	if newConfiguration.Type == "" {
 		return nil, errors.Wrap(err, "Operator type not specified")

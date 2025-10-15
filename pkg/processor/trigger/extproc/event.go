@@ -33,10 +33,13 @@ func (e *Event) GetBody() []byte {
 
 // GetHeaderByteSlice returns the header by name as a byte slice
 func (e *Event) GetHeaderByteSlice(key string) []byte {
-
-	// TODO: consider lifetime of the header. User may not keep a reference
-	_, value, _ := e.ctx.AllHeaders.GetHeaderValue(key)
-	return value
+	if value, ok := e.ctx.AllHeaders.RawHeaders[key]; ok {
+		return value
+	}
+	if value, ok := e.ctx.AllHeaders.Headers[key]; ok {
+		return []byte(value)
+	}
+	return nil
 }
 
 // GetHeader returns the header by name as an interface{}
@@ -47,7 +50,14 @@ func (e *Event) GetHeader(key string) interface{} {
 // GetHeaders loads all headers into a map of string / interface{}
 func (e *Event) GetHeaders() map[string]interface{} {
 	headers := make(map[string]interface{})
+
+	// Add string headers
 	for key, value := range e.ctx.AllHeaders.Headers {
+		headers[key] = []byte(value)
+	}
+
+	// Add raw headers (will override string headers if both exist)
+	for key, value := range e.ctx.AllHeaders.RawHeaders {
 		headers[string(key)] = value
 	}
 	return headers
