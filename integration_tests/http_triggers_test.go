@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -29,16 +30,34 @@ func TestGetRequest(t *testing.T) {
 	env = append(env, "PATH="+filepath.Join(projectDir, "./venv3.10/bin")+":"+os.Getenv("PATH"))
 	cmd := exec.Command("go", "run", "../cmd/processor", "--config="+configPath)
 	cmd.Env = env
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("Failed to start processor: %v", err)
 	}
 	defer func() {
-		cmd.Process.Kill()
-		cmd.Wait()
+		if cmd.Process != nil {
+			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			cmd.Wait()
+		}
 	}()
 
 	url := "http://localhost:8080"
+
+	ready := false
+	for i := 0; i < 20; i++ {
+		time.Sleep(500 * time.Millisecond)
+		resp, err := http.Get(url)
+		if err == nil {
+			resp.Body.Close()
+			ready = true
+			break
+		}
+	}
+	if !ready {
+		cmd.Process.Kill()
+		t.Fatalf("Processor did not start within timeout")
+	}
 
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
 	if err != nil {
@@ -70,4 +89,11 @@ func TestGetRequest(t *testing.T) {
 	}
 
 	t.Logf("HTTP trigger responded with status: %d", resp.StatusCode)
+
+	defer func() {
+		if cmd.Process != nil {
+			cmd.Process.Kill()
+			cmd.Wait()
+		}
+	}()
 }
