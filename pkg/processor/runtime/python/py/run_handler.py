@@ -9,11 +9,13 @@ import typing
 from pathlib import Path
 from typing import Any, Callable
 
+from digitalhub.context.api import get_context
 from digitalhub.entities.project.crud import get_project
 from digitalhub.entities.run.crud import get_run
-from digitalhub.context.api import get_context
 from digitalhub.runtimes.enums import RuntimeEnvVar
-from digitalhub_runtime_python.utils.configuration import import_function_and_init_from_source
+from digitalhub_runtime_python.utils.configuration import (
+    import_function_and_init_from_source,
+)
 from digitalhub_runtime_python.utils.inputs import compose_init, compose_inputs
 from digitalhub_runtime_python.utils.outputs import build_status, parse_outputs
 
