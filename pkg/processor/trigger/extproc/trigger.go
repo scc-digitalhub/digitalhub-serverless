@@ -132,7 +132,6 @@ func (ep *extproc) AllocateWorkerAndSubmitEvent(req *Event,
 	}
 
 	// use the event @ the worker index
-	// TODO: event already used?
 	workerIndex := workerInstance.GetIndex()
 	if workerIndex < 0 || workerIndex >= len(ep.events) {
 		ep.WorkerAllocator.Release(workerInstance)
@@ -245,7 +244,7 @@ func (ep *extproc) handleRequest(ctx *RequestContext, body []byte) (*nuclio.Resp
 	case string:
 		res := &nuclio.Response{
 			StatusCode: 0,
-			Body:       []byte(typedResponse), // TODO: this is not a string, but a byte array, should be fixed in nucliotypedResponse,
+			Body:       []byte(typedResponse),
 		}
 		return res, nil
 	}

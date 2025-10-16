@@ -155,7 +155,6 @@ func (s *GenericExtProcServer) Process(srv extprocv3.ExternalProcessor_ProcessSe
 			log.Printf("Phase processing error %v\n", err)
 		} else if resp == nil {
 			log.Printf("Phase processing did not define a response\n")
-			// TODO: what here? continue request?
 		} else {
 			if s.options.LogPhases {
 				log.Printf("Sending ProcessingResponse: %v \n", resp)
@@ -164,8 +163,6 @@ func (s *GenericExtProcServer) Process(srv extprocv3.ExternalProcessor_ProcessSe
 				log.Printf("Send error %v", err)
 			}
 		}
-		// TODO: enable stream cancellation, may have a leak without it?
-
 	} // end for over stream messages
 }
 
@@ -190,7 +187,6 @@ func (s *GenericExtProcServer) processPhase(procReq *extprocv3.ProcessingRequest
 		}
 		h := req.RequestHeaders
 
-		// TODO: err check, but what is an error?
 		ah, _ := NewAllHeadersFromEnvoyHeaderMap(h.Headers)
 		ah.Headers[ProcessingPhaseHeader] = strconv.Itoa(phase)
 
@@ -201,18 +197,6 @@ func (s *GenericExtProcServer) processPhase(procReq *extprocv3.ProcessingRequest
 		// set content-type, content-encoding, and/or transfer-encoding as available
 		rc.bodybuffer = NewEncodedBodyFromHeaders(rc.AllHeaders)
 
-		// TODO: _Could_ stack processors internally, e.g.
-		//
-		// 		for _, p := range s.processors { err = p.ProcessRequestHeaders(...); if err != nil { break } }
-		//
-		// This might get confusing though? Also response phase order
-		// would need to be inverted.
-		//
-		// In any case, it would be a distinctly different behavior than
-		// stacking ExtProcs in envoy. Until there is a need for this,
-		// it's much easier to reason about one processor per ExtProc.
-		// Users can "stack" whatever behaviors they like in the processors
-		// themselves anyway.
 		ps = time.Now()
 		err = processor.ProcessRequestHeaders(rc, *rc.AllHeaders)
 		rc.Duration += time.Since(ps)
@@ -237,7 +221,6 @@ func (s *GenericExtProcServer) processPhase(procReq *extprocv3.ProcessingRequest
 		}
 		ts := req.RequestTrailers
 
-		// TODO: err check, but what is an error?
 		trailers, _ := NewAllHeadersFromEnvoyHeaderMap(ts.Trailers)
 		rc.AllHeaders.Headers[ProcessingPhaseHeader] = strconv.Itoa(phase)
 
@@ -256,7 +239,6 @@ func (s *GenericExtProcServer) processPhase(procReq *extprocv3.ProcessingRequest
 
 		// _response_ headers
 
-		// TODO: err check, but what is an error?
 		headers, _ := NewAllHeadersFromEnvoyHeaderMap(hs.Headers)
 
 		// set status (ignoring error if found, 0 default)
@@ -305,7 +287,6 @@ func (s *GenericExtProcServer) processPhase(procReq *extprocv3.ProcessingRequest
 		}
 		ts := req.ResponseTrailers
 
-		// TODO: err check, but what is an error?
 		trailers, _ := NewAllHeadersFromEnvoyHeaderMap(ts.Trailers)
 
 		ps = time.Now()

@@ -71,7 +71,7 @@ func ServeWithOptions(port int, serverOpts ExtProcServerOptions, processor Reque
 	reflection.Register(s)
 
 	name := processor.GetName()
-	opts := processor.GetOptions() // TODO: figure out command line overrides
+	opts := processor.GetOptions()
 	extproc := &GenericExtProcServer{
 		name:      name,
 		processor: processor,

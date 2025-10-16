@@ -75,7 +75,7 @@ func (s *WrapProcessor) ProcessRequestHeaders(ctx *RequestContext, headers AllHe
 }
 
 func (s *WrapProcessor) ProcessRequestBody(ctx *RequestContext, body []byte) error {
-	_, res, err := s.wrapRequest(ctx, nil)
+	_, res, err := s.wrapRequest(ctx, body)
 	if err != nil {
 		log.Printf("Error: %v", err)
 	} else if res != nil {
