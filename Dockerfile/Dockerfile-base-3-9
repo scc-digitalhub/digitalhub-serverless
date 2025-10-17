@@ -22,6 +22,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     default-libmysqlclient-dev \
     && rm -rf /var/lib/apt/lists/*
 
+RUN useradd -r -m -u 8877 nonroot
+USER 8877
+
 RUN python -m pip install "digitalhub[full]==${ver_sdk}" \
                           "digitalhub-runtime-python==${ver_python}" \
                           "digitalhub-runtime-container==${ver_container}"  \
@@ -33,7 +36,6 @@ RUN python -m pip install "digitalhub[full]==${ver_sdk}" \
                           "msgpack" \
                           "nuclio-sdk"
 
-RUN useradd -r -m -u 8877 nonroot
-USER 8877
+ENV PATH="/home/nonroot/.local/bin:$PATH"
 
 WORKDIR /shared
