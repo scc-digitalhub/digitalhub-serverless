@@ -26,11 +26,9 @@ func TestJob(t *testing.T) {
 	env = append(env, "NUCLIO_PYTHON_EXECUTABLE="+pythonPath)
 	env = append(env, "PATH="+filepath.Join(projectDir, "./venv3.10/bin")+":"+os.Getenv("PATH"))
 
-	// Use fixed temp paths
 	inputPath := filepath.Join(os.TempDir(), "job_input.txt")
 	outputPath := filepath.Join(os.TempDir(), "job_output.txt")
 
-	// Write input file with test data
 	err = os.WriteFile(inputPath, []byte("job text"), 0644)
 	if err != nil {
 		t.Fatalf("Failed to write input file: %v", err)
@@ -41,7 +39,6 @@ func TestJob(t *testing.T) {
 	t.Logf("Input file: %s", inputPath)
 	t.Logf("Output file: %s", outputPath)
 
-	// Pass file paths to processor via environment
 	env = append(env, "JOB_INPUT_FILE="+inputPath)
 	env = append(env, "JOB_OUTPUT_FILE="+outputPath)
 
@@ -49,7 +46,6 @@ func TestJob(t *testing.T) {
 	cmd.Env = env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	// Capture stdout and stderr for debugging
 	var stdOut, stdErr bytes.Buffer
 	cmd.Stdout = &stdOut
 	cmd.Stderr = &stdErr
@@ -64,7 +60,6 @@ func TestJob(t *testing.T) {
 		}
 	}()
 
-	// Wait for job to complete
 	done := make(chan error, 1)
 	go func() {
 		done <- cmd.Wait()
@@ -81,7 +76,6 @@ func TestJob(t *testing.T) {
 		t.Fatalf("Job did not complete within timeout")
 	}
 
-	// Read the output file written by the handler
 	output, err := os.ReadFile(outputPath)
 	if err != nil {
 		t.Logf("Processor stdout: %s", stdOut.String())
