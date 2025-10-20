@@ -254,11 +254,9 @@ func TestPostJSONRequest(t *testing.T) {
 	}
 
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewBuffer(jsonData))
-	// req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, strings.NewReader(string(jsonData)))
 	if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
 	}
-	// req.Header.Set("Content-Type", "text/plain")
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {

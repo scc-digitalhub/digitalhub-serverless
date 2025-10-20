@@ -5,10 +5,9 @@ metadata:
   namespace: nuclio
 spec:
   runtime: python:3.10
-  handler: job:handler
+  handler: job_file:handler
   triggers:
-    myHttpTrigger:
+    myJobTrigger:
       kind: job
       attributes:
-        dataFile: "/tmp/job_input.txt"
       maxWorkers: 1
