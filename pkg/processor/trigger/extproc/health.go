@@ -23,3 +23,7 @@ func (s *HealthServer) Check(ctx context.Context, req *pb.HealthCheckRequest) (*
 func (s *HealthServer) Watch(req *pb.HealthCheckRequest, srv pb.Health_WatchServer) error {
 	return status.Error(codes.Unimplemented, "Watch is not implemented")
 }
+
+func (h *HealthServer) List(ctx context.Context, req *pb.HealthListRequest) (*pb.HealthListResponse, error) {
+	return &pb.HealthListResponse{}, nil
+}
