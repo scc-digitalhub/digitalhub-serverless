@@ -74,6 +74,10 @@ extproc gRPC server outside of the compose (``host.docker.internal``, port 5051)
 To run / debug the extproc processor, it is possible to run the predefined script: [test/extproc/run.sh](test/extproc/run.sh). The application
 relies on a Python runtime and therefore expects a preconfigured Python runtime with the Nuclio python SDK installed.
 
+Once you have the docker container and the application running, you can test it with the following curl command:
+```bash
+curl localhost:8080/resource -X POST -H 'Content-type: text/plain' -d 'hello' -s -vvv
+```
 
 ## Development
 
