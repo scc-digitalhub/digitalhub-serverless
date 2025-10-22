@@ -6,9 +6,17 @@
 import nuclio_sdk
 
 def handler_serve(context: nuclio_sdk.Context, event: nuclio_sdk.Event):
-    context.logger.info_with('Invoked processing phase', method=event.headers.get('processing-phase'))    
-    context.logger.info_with('Invoked method', method=event.method)
-    context.logger.info_with('Invoked path', path=event.path)
-    context.logger.info_with('Invoked body', body=event.body)
-    context.logger.info_with('Invoked headers', headers=event.headers)
+    phase = event.headers.get('processing-phase').decode('utf-8')
+    context.logger.info_with('Invoked processing phase', phase=phase)    
+    # context.logger.info_with('Invoked method', method=event.method)
+    # context.logger.info_with('Invoked path', path=event.path)
+    context.logger.info_with('Invoked body', body=event.body.decode('utf-8'))
+    # context.logger.info_with('Invoked headers', headers=event.headers)
+    # request body processing phase
+    if phase == '2':
+        return event.body.decode('utf-8') + " - preprocessed"
+    # response body processing phase
+    if phase == '5':
+        return event.body.decode('utf-8') + " - postprocessed"
+    # default response
     return "Hello, from Nuclio :]"
