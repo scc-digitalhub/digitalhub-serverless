@@ -25,7 +25,6 @@ if typing.TYPE_CHECKING:
 
 
 DEFAULT_PATH = Path("/shared")
-DEFAULT_PY_FILE = "main.py"
 
 
 def execute_user_init(init_function: Callable, context: Context, run: RunPythonRun) -> None:
@@ -83,7 +82,7 @@ def init_context(context: Context) -> None:
     # default_py_file filename is "main.py", source is the
     # function source
     source = run.spec.to_dict().get("source")
-    func, init_function = import_function_and_init_from_source(DEFAULT_PATH, source, DEFAULT_PY_FILE)
+    func, init_function = import_function_and_init_from_source(DEFAULT_PATH, source)
 
     # Set attributes
     setattr(context, "project", project)
