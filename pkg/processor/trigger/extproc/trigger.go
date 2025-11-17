@@ -127,7 +127,7 @@ func (ep *extproc) AllocateWorkerAndSubmitEvent(req *Event,
 	// allocate a worker
 	workerInstance, err := ep.WorkerAllocator.Allocate(timeout)
 	if err != nil {
-		ep.UpdateStatistics(false)
+		ep.UpdateStatistics(false, 1)
 		return nil, false, errors.Wrap(err, "Failed to allocate worker"), nil
 	}
 
