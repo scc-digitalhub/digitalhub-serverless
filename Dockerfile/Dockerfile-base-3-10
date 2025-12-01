@@ -10,7 +10,6 @@ ARG ver_python=0.15.0b0
 ARG ver_container=0.15.0b0
 ARG ver_modelserve=0.15.0b0
 ARG ver_dbt=0.15.0b0
-ARG ver_kfp=0.14.2
 ARG ver_hera=0.15.0b0
 ARG ver_flower=0.15.0b0
 
@@ -30,7 +29,6 @@ RUN python -m pip install "digitalhub[full]==${ver_sdk}" \
                           "digitalhub-runtime-container==${ver_container}"  \
                           "digitalhub-runtime-modelserve==${ver_modelserve}" \
                           "digitalhub-runtime-dbt==${ver_dbt}" \
-                          "digitalhub-runtime-kfp==${ver_kfp}" \
                           "digitalhub-runtime-flower==${ver_flower}" \
                           "digitalhub-runtime-hera==${ver_hera}" \
                           "msgpack" \
