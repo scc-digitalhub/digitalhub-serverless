@@ -11,4 +11,5 @@ spec:
       kind: websocket
       attributes:
         websocketAddr: ":9001"
+        ChunkDurationSeconds: 2
       maxWorkers: 1
