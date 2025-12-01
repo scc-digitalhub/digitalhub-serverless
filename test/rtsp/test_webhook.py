@@ -5,7 +5,7 @@ app = Flask(__name__)
 @app.route("/audio", methods=["POST"])
 def receive():
     print("=== GOT POST ===")
-    print(request.json)       # print JSON payload
+    print(request.json)
     print("================")
     return "ok", 200
 
