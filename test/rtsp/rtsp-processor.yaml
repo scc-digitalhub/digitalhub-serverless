@@ -10,8 +10,8 @@ spec:
     myRtspTrigger:
       kind: rtsp
       attributes:
-        rtspUrl: rtsp://localhost:8554/mystream
-        ChunkDurationSeconds: 2
+        rtsp_url: rtsp://localhost:8554/mystream
+        chunk_duration_seconds: 2
         output:
           kind: webhook
           config:
