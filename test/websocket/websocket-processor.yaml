@@ -10,6 +10,6 @@ spec:
     myWebsocketTrigger:
       kind: websocket
       attributes:
-        websocketAddr: ":9001"
-        ChunkDurationSeconds: 2
+        websocket_addr: ":9001"
+        chunk_duration_seconds: 2
       maxWorkers: 1

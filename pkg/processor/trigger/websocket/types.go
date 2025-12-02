@@ -19,12 +19,12 @@ const (
 
 type Configuration struct {
 	trigger.Configuration
-	WebSocketAddr        string `mapstructure:"websocketAddr"`
-	BufferSize           int    `mapstructure:"bufferSize"`
-	SampleRate           int    `mapstructure:"sampleRate"`
-	ChunkDurationSeconds int    `mapstructure:"chunkDurationSeconds"`
-	MaxBufferSeconds     int    `mapstructure:"maxBufferSeconds"`
-	TrimSeconds          int    `mapstructure:"trimSeconds"`
+	WebSocketAddr        string `mapstructure:"websocket_addr"`
+	BufferSize           int    `mapstructure:"buffer_size"`
+	SampleRate           int    `mapstructure:"sample_rate"`
+	ChunkDurationSeconds int    `mapstructure:"chunk_duration_seconds"`
+	MaxBufferSeconds     int    `mapstructure:"max_buffer_seconds"`
+	TrimSeconds          int    `mapstructure:"trim_seconds"`
 }
 
 func NewConfiguration(id string,
