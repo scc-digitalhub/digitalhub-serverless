@@ -19,12 +19,12 @@ const (
 type Configuration struct {
 	trigger.Configuration
 
-	RTSPURL              string                 `mapstructure:"rtspUrl"`
-	BufferSize           int                    `mapstructure:"bufferSize"`
-	SampleRate           int                    `mapstructure:"sampleRate"`
-	ChunkDurationSeconds int                    `mapstructure:"chunkDurationSeconds"`
-	MaxBufferSeconds     int                    `mapstructure:"maxBufferSeconds"`
-	TrimSeconds          int                    `mapstructure:"trimSeconds"`
+	RTSPURL              string                 `mapstructure:"rtsp_url"`
+	BufferSize           int                    `mapstructure:"buffer_size"`
+	SampleRate           int                    `mapstructure:"sample_rate"`
+	ChunkDurationSeconds int                    `mapstructure:"chunk_duration_seconds"`
+	MaxBufferSeconds     int                    `mapstructure:"max_buffer_seconds"`
+	TrimSeconds          int                    `mapstructure:"trim_seconds"`
 	Output               map[string]interface{} `mapstructure:"output"`
 }
 
