@@ -12,22 +12,24 @@ import (
 
 // AudioProcessor accumulates PCM audio into chunks and manages a rolling buffer
 type AudioProcessor struct {
-	lock       sync.Mutex
-	chunkBytes int
-	maxBytes   int
-	trimBytes  int
-	chunkBuf   []byte
-	buffer     []byte
+	lock             sync.Mutex
+	chunkBytes       int
+	maxBytes         int
+	trimBytes        int
+	chunkBuf         []byte
+	buffer           []byte
+	accumulateBuffer bool
 }
 
 // NewAudioProcessor creates a new audio processor
-func NewAudioProcessor(sampleRate, chunkDurationSeconds, maxBufferSeconds, trimSeconds int) *AudioProcessor {
+func NewAudioProcessor(sampleRate, chunkDurationSeconds, maxBufferSeconds, trimSeconds int, accumulateBuffer bool) *AudioProcessor {
 	return &AudioProcessor{
-		chunkBytes: chunkDurationSeconds * sampleRate * 2, // 2 bytes per sample (16-bit)
-		maxBytes:   maxBufferSeconds * sampleRate * 2,
-		trimBytes:  trimSeconds * sampleRate * 2,
-		chunkBuf:   []byte{},
-		buffer:     []byte{},
+		chunkBytes:       chunkDurationSeconds * sampleRate * 2, // 2 bytes per sample (16-bit)
+		maxBytes:         maxBufferSeconds * sampleRate * 2,
+		trimBytes:        trimSeconds * sampleRate * 2,
+		chunkBuf:         []byte{},
+		buffer:           []byte{},
+		accumulateBuffer: accumulateBuffer,
 	}
 }
 
@@ -49,12 +51,16 @@ func (ap *AudioProcessor) AddPCM(pcm []byte) [][]byte {
 		copy(chunk, ap.chunkBuf[:ap.chunkBytes])
 		ap.chunkBuf = ap.chunkBuf[ap.chunkBytes:]
 
-		// Add chunk to rolling buffer
-		ap.buffer = append(ap.buffer, chunk...)
+		if ap.accumulateBuffer {
+			// Add chunk to rolling buffer
+			ap.buffer = append(ap.buffer, chunk...)
 
-		// Trim buffer if it exceeds max size
-		if len(ap.buffer) > ap.maxBytes {
-			ap.buffer = ap.buffer[ap.trimBytes:]
+			// Trim buffer if it exceeds max size
+			if len(ap.buffer) > ap.maxBytes {
+				ap.buffer = ap.buffer[ap.trimBytes:]
+			}
+		} else {
+			ap.buffer = chunk
 		}
 
 		// Add chunk to output

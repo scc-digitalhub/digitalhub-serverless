@@ -68,7 +68,8 @@ func (ws_t *websocket_trigger) Start(checkpoint functionconfig.Checkpoint) error
 		ws_t.configuration.SampleRate,
 		ws_t.configuration.ChunkDurationSeconds,
 		ws_t.configuration.MaxBufferSeconds,
-		ws_t.configuration.TrimSeconds)
+		ws_t.configuration.TrimSeconds,
+		ws_t.configuration.AccumulateBuffer)
 
 	ws_t.wg.Add(1)
 	go ws_t.startWebSocketServer()

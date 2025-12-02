@@ -25,6 +25,7 @@ type Configuration struct {
 	ChunkDurationSeconds int    `mapstructure:"chunk_duration_seconds"`
 	MaxBufferSeconds     int    `mapstructure:"max_buffer_seconds"`
 	TrimSeconds          int    `mapstructure:"trim_seconds"`
+	AccumulateBuffer     bool   `mapstructure:"accumulate_buffer"`
 }
 
 func NewConfiguration(id string,
