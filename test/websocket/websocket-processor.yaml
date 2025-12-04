@@ -10,7 +10,8 @@ spec:
     myWebsocketTrigger:
       kind: websocket
       attributes:
-        websocket_addr: ":9001"
+        websocket_addr: :9001
+        data_type: audio
         chunk_duration_seconds: 5
         accumulate_buffer: false
       maxWorkers: 1

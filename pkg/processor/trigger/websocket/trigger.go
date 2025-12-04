@@ -138,9 +138,12 @@ func (ws_t *websocket_trigger) handleIncomingMessages(conn *websocket.Conn) {
 			continue
 		}
 
-		chunks := ws_t.processor.AddPCM(data)
-		if len(chunks) == 0 {
-			continue
+		var chunks [][]byte
+		if ws_t.configuration.DataType == "audio" {
+			chunks = ws_t.processor.AddPCM(data)
+			if len(chunks) == 0 {
+				continue
+			}
 		}
 
 		ws_t.processor.lock.Lock()

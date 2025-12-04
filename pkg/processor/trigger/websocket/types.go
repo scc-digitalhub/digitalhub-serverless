@@ -20,6 +20,7 @@ const (
 type Configuration struct {
 	trigger.Configuration
 	WebSocketAddr        string `mapstructure:"websocket_addr"`
+	DataType             string `mapstructure:"data_type"`
 	BufferSize           int    `mapstructure:"buffer_size"`
 	SampleRate           int    `mapstructure:"sample_rate"`
 	ChunkDurationSeconds int    `mapstructure:"chunk_duration_seconds"`
@@ -34,6 +35,7 @@ func NewConfiguration(id string,
 
 	newConfiguration := Configuration{
 		WebSocketAddr:        "",
+		DataType:             "",
 		BufferSize:           DefaultBufferSize,
 		SampleRate:           DefaultSampleRate,
 		ChunkDurationSeconds: DefaultChunkDurationSeconds,
@@ -52,7 +54,11 @@ func NewConfiguration(id string,
 	}
 
 	if newConfiguration.WebSocketAddr == "" {
-		return nil, errors.New("websocketAddr is required")
+		return nil, errors.New("websocket_addr is required")
+	}
+
+	if newConfiguration.DataType == "" {
+		return nil, errors.New("data_type is required")
 	}
 
 	return &newConfiguration, nil
