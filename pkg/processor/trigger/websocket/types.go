@@ -15,6 +15,7 @@ const (
 	DefaultChunkDurationSeconds = 5
 	DefaultMaxBufferSeconds     = 45
 	DefaultTrimSeconds          = 30
+	DefaultAccumulateBuffer     = true
 )
 
 type Configuration struct {
@@ -41,6 +42,7 @@ func NewConfiguration(id string,
 		ChunkDurationSeconds: DefaultChunkDurationSeconds,
 		MaxBufferSeconds:     DefaultMaxBufferSeconds,
 		TrimSeconds:          DefaultTrimSeconds,
+		AccumulateBuffer:     DefaultAccumulateBuffer,
 	}
 
 	baseConfiguration, err := trigger.NewConfiguration(id, triggerConfiguration, runtimeConfiguration)
