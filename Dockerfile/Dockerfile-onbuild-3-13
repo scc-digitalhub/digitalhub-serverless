@@ -17,8 +17,8 @@ ARG SERVERLESS_DOCKER_REPO=ghcr.io/scc-digitalhub/digitalhub-serverless
 ARG NUCLIO_DOCKER_IMAGE_TAG=1.13.2-amd64
 ARG NUCLIO_DOCKER_REPO=quay.io/nuclio
 
-# Supplies python 3.9 & common wheels
-FROM gcr.io/iguazio/python:3.9 AS python39-builder
+# Supplies python 3.13 & common wheels
+FROM gcr.io/iguazio/python:3.13 AS python313-builder
 COPY pkg/processor/runtime/python/py/requirements /requirements
 RUN pip download --dest /whl --exists-action i  --requirement /requirements/common.txt
 
@@ -34,4 +34,4 @@ COPY pkg/processor/runtime/python/py /opt/nuclio
 # Copy processor
 COPY --from=processor /home/nuclio/bin/processor /home/nuclio/bin/processor
 # Copy wheels
-COPY --from=python39-builder /whl /home/nuclio/bin/py3.9-whl
+COPY --from=python313-builder /whl /home/nuclio/bin/py3.13-whl

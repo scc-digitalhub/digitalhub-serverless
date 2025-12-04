@@ -9,20 +9,22 @@ import typing
 from pathlib import Path
 from typing import Any, Callable
 
+from digitalhub.context.api import get_context
 from digitalhub.entities.project.crud import get_project
 from digitalhub.entities.run.crud import get_run
-from digitalhub.context.api import get_context
 from digitalhub.runtimes.enums import RuntimeEnvVar
-from digitalhub_runtime_python.utils.configuration import import_function_and_init_from_source
+from digitalhub_runtime_python.utils.configuration import (
+    import_function_and_init_from_source,
+)
 from digitalhub_runtime_python.utils.inputs import compose_init, compose_inputs
 from digitalhub_runtime_python.utils.outputs import build_status, parse_outputs
 
 if typing.TYPE_CHECKING:
-    from digitalhub_runtime_python.entities.run.python_run.entity import RunPythonRun
+    from digitalhub_runtime_python.entities.run._base.entity import RunPythonRun
     from nuclio_sdk import Context, Event, Response
 
 
-DEFAULT_PY_FILE = "main.py"
+DEFAULT_PATH = Path("/shared")
 
 
 def execute_user_init(init_function: Callable, context: Context, run: RunPythonRun) -> None:
@@ -37,10 +39,6 @@ def execute_user_init(init_function: Callable, context: Context, run: RunPythonR
         Nuclio context.
     run : RunPythonRun
         Run entity.
-
-    Returns
-    -------
-    None
     """
     init_params: dict = run.spec.to_dict().get("init_parameters", {})
     params = compose_init(init_function, context, init_params)
@@ -57,10 +55,6 @@ def init_context(context: Context) -> None:
     ----------
     context : Context
         Nuclio context.
-
-    Returns
-    -------
-    None
     """
     context.logger.info("Initializing context...")
 
@@ -87,9 +81,8 @@ def init_context(context: Context) -> None:
     # user dir (will be taken from run spec in the future),
     # default_py_file filename is "main.py", source is the
     # function source
-    path = Path("/shared")
     source = run.spec.to_dict().get("source")
-    func, init_function = import_function_and_init_from_source(path, source, DEFAULT_PY_FILE)
+    func, init_function = import_function_and_init_from_source(DEFAULT_PATH, source)
 
     # Set attributes
     setattr(context, "project", project)
