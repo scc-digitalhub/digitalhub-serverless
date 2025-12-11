@@ -17,7 +17,7 @@ from digitalhub_runtime_python.utils.configuration import (
     import_function_and_init_from_source,
 )
 from digitalhub_runtime_python.utils.inputs import compose_init, compose_inputs
-from digitalhub_runtime_python.utils.outputs import build_status, parse_outputs
+from digitalhub_runtime_python.utils.outputs import build_new_status, parse_outputs
 
 if typing.TYPE_CHECKING:
     from digitalhub_runtime_python.entities.run._base.entity import RunPythonRun
@@ -27,7 +27,11 @@ if typing.TYPE_CHECKING:
 DEFAULT_PATH = Path("/shared")
 
 
-def execute_user_init(init_function: Callable, context: Context, run: RunPythonRun) -> None:
+def execute_user_init(
+    init_function: Callable,
+    context: Context,
+    run: RunPythonRun,
+) -> None:
     """
     Execute user init function.
 
@@ -67,11 +71,14 @@ def init_context(context: Context) -> None:
     ctx.root.mkdir(parents=True, exist_ok=True)
 
     # Get run
-    run: RunPythonRun = get_run(os.getenv(RuntimeEnvVar.RUN_ID.value), project=project_name)
+    run: RunPythonRun = get_run(
+        os.getenv(RuntimeEnvVar.RUN_ID.value),
+        project=project_name,
+    )
 
     # Set running context
     context.logger.info("Starting execution.")
-    run._start_execution()
+    run.start_execution()
 
     # Get inputs if they exist
     run.spec.inputs = run.inputs(as_dict=True)
@@ -138,46 +145,37 @@ def handler_job(context: Context, event: Event) -> Response:
         project: str = context.project.name
         context.logger.info("Executing function.")
         if hasattr(context.user_function, "__wrapped__"):
-            results = context.user_function(project, context.run.key, **func_args)
+            results: dict = context.user_function(project, context.run.key, **func_args)
         else:
             exec_result = context.user_function(**func_args)
-            results = parse_outputs(exec_result, list(spec.get("outputs", {})), project, context.run.key)
+            results = parse_outputs(exec_result, project, context.run.key)
+
         context.logger.info(f"Output results: {results}")
-    except Exception as e:
-        raise e
-    finally:
-        context.run._finish_execution()
 
-    ############################
-    # Set run status
-    ############################
-    try:
-        context.logger.info("Building run status.")
-        status = build_status(results, spec.get("outputs", {}))
-    except Exception as e:
-        raise e
-    finally:
-        context.run._finish_execution()
-
-    ############################
-    # Set status
-    ############################
-    try:
-        context.logger.info(f"Setting new run status: {status}")
+        context.logger.info("Setting run status.")
         context.run.refresh()
-        new_status = {**status, **context.run.status.to_dict()}
-        context.run._set_status(new_status)
+        new_status = {
+            **build_new_status(context.project.name, results),
+            **context.run.status.to_dict(),
+        }
+        context.run.set_status(new_status)
         context.run.save(update=True)
+
     except Exception as e:
         raise e
     finally:
-        context.run._finish_execution()
+        context.run.end_execution()
 
     ############################
     # End
     ############################
     context.logger.info("Done.")
-    return context.Response(body="OK", headers={}, content_type="text/plain", status_code=200)
+    return context.Response(
+        body="OK",
+        headers={},
+        content_type="text/plain",
+        status_code=200,
+    )
 
 
 def handler_serve(context: Context, event: Event) -> Any:
@@ -213,7 +211,7 @@ def handler_serve(context: Context, event: Event) -> Any:
     except Exception as e:
         raise e
     finally:
-        context.run._finish_execution()
+        context.run.end_execution()
 
     ############################
     # Call user function
@@ -224,4 +222,4 @@ def handler_serve(context: Context, event: Event) -> Any:
     except Exception as e:
         raise e
     finally:
-        context.run._finish_execution()
+        context.run.end_execution()
