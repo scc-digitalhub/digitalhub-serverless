@@ -8,64 +8,116 @@ package websocket
 
 import (
 	"sync"
+	"time"
 )
 
-// AudioProcessor accumulates PCM audio into chunks and manages a rolling buffer
-type AudioProcessor struct {
-	lock             sync.Mutex
-	chunkBytes       int
-	maxBytes         int
-	trimBytes        int
-	chunkBuf         []byte
-	buffer           []byte
-	accumulateBuffer bool
+type DataProcessor struct {
+	lock sync.Mutex
+
+	chunkBytes int
+	maxBytes   int
+	trimBytes  int
+	sleepTime  time.Duration
+	isStream   bool
+
+	chunkBuf []byte
+	buffer   []byte
+
+	newBytes int // bytes added since last emit
+
+	output chan *Event
+	stop   chan struct{}
 }
 
-// NewAudioProcessor creates a new audio processor
-func NewAudioProcessor(sampleRate, chunkDurationSeconds, maxBufferSeconds, trimSeconds int, accumulateBuffer bool) *AudioProcessor {
-	return &AudioProcessor{
-		chunkBytes:       chunkDurationSeconds * sampleRate * 2, // 2 bytes per sample (16-bit)
-		maxBytes:         maxBufferSeconds * sampleRate * 2,
-		trimBytes:        trimSeconds * sampleRate * 2,
-		chunkBuf:         []byte{},
-		buffer:           []byte{},
-		accumulateBuffer: accumulateBuffer,
+func NewDataProcessor(
+	chunkBytes,
+	maxBytes,
+	trimBytes int,
+	sleepTime time.Duration,
+	isStream bool,
+) *DataProcessor {
+
+	return &DataProcessor{
+		chunkBytes: chunkBytes,
+		maxBytes:   maxBytes,
+		trimBytes:  trimBytes,
+		sleepTime:  sleepTime,
+		isStream:   isStream,
+		chunkBuf:   []byte{},
+		buffer:     []byte{},
+		output:     make(chan *Event, 8),
+		stop:       make(chan struct{}),
 	}
 }
 
-// AddPCM adds PCM data to the processor and returns any complete chunks
-// Returns a slice of complete chunks (each as []byte)
-func (ap *AudioProcessor) AddPCM(pcm []byte) [][]byte {
-	ap.lock.Lock()
-	defer ap.lock.Unlock()
+func (dp *DataProcessor) Start() {
+	go dp.loop()
+}
 
-	var chunks [][]byte
+func (dp *DataProcessor) Stop() {
+	close(dp.stop)
+}
 
-	// Append incoming data to temp buffer
-	ap.chunkBuf = append(ap.chunkBuf, pcm...)
+func (dp *DataProcessor) manageBuffer(data []byte) {
+	dp.lock.Lock()
+	defer dp.lock.Unlock()
 
-	// Extract complete chunks
-	for len(ap.chunkBuf) >= ap.chunkBytes {
-		// Get one complete chunk
-		chunk := make([]byte, ap.chunkBytes)
-		copy(chunk, ap.chunkBuf[:ap.chunkBytes])
-		ap.chunkBuf = ap.chunkBuf[ap.chunkBytes:]
+	dp.chunkBuf = append(dp.chunkBuf, data...)
 
-		if ap.accumulateBuffer {
-			// Add chunk to rolling buffer
-			ap.buffer = append(ap.buffer, chunk...)
+	for len(dp.chunkBuf) >= dp.chunkBytes {
+		chunk := make([]byte, dp.chunkBytes)
+		copy(chunk, dp.chunkBuf[:dp.chunkBytes])
+		dp.chunkBuf = dp.chunkBuf[dp.chunkBytes:]
 
-			// Trim buffer if it exceeds max size
-			if len(ap.buffer) > ap.maxBytes {
-				ap.buffer = ap.buffer[ap.trimBytes:]
+		// remove, to do separately for discrete
+		if dp.isStream {
+			dp.buffer = append(dp.buffer, chunk...)
+			if len(dp.buffer) > dp.maxBytes {
+				dp.buffer = dp.buffer[dp.trimBytes:]
 			}
 		} else {
-			ap.buffer = chunk
+			dp.buffer = chunk
 		}
 
-		// Add chunk to output
-		chunks = append(chunks, chunk)
+		dp.newBytes += len(chunk)
+	}
+}
+
+func (dp *DataProcessor) loop() {
+	ticker := time.NewTicker(dp.sleepTime * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-dp.stop:
+			return
+		case <-ticker.C:
+			if event := dp.tryEmit(); event != nil {
+				dp.output <- event
+			}
+		}
+	}
+}
+
+func (dp *DataProcessor) tryEmit() *Event {
+	dp.lock.Lock()
+	defer dp.lock.Unlock()
+
+	if dp.newBytes < dp.chunkBytes {
+		return nil
 	}
 
-	return chunks
+	snapshot := make([]byte, len(dp.buffer))
+	copy(snapshot, dp.buffer)
+
+	dp.newBytes = 0
+
+	return &Event{
+		body:      snapshot,
+		timestamp: time.Now(),
+	}
+}
+
+func (dp *DataProcessor) Output() <-chan *Event {
+	return dp.output
 }

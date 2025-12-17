@@ -1,6 +1,8 @@
 package websocket
 
 import (
+	"time"
+
 	"github.com/nuclio/nuclio/pkg/functionconfig"
 	"github.com/nuclio/nuclio/pkg/processor/runtime"
 	"github.com/nuclio/nuclio/pkg/processor/trigger"
@@ -10,24 +12,23 @@ import (
 )
 
 const (
-	DefaultBufferSize           = 4096
-	DefaultSampleRate           = 16000
-	DefaultChunkDurationSeconds = 5
-	DefaultMaxBufferSeconds     = 45
-	DefaultTrimSeconds          = 30
-	DefaultAccumulateBuffer     = true
+	DefaultBufferSize = 4096
+	DefaultChunkBytes = 160000
+	DefaultMaxBytes   = 1440000
+	DefaultTrimBytes  = 1120000
+	DefaultSleepTime  = 20
+	DefaultIsStream   = false
 )
 
 type Configuration struct {
 	trigger.Configuration
-	WebSocketAddr        string `mapstructure:"websocket_addr"`
-	DataType             string `mapstructure:"data_type"`
-	BufferSize           int    `mapstructure:"buffer_size"`
-	SampleRate           int    `mapstructure:"sample_rate"`
-	ChunkDurationSeconds int    `mapstructure:"chunk_duration_seconds"`
-	MaxBufferSeconds     int    `mapstructure:"max_buffer_seconds"`
-	TrimSeconds          int    `mapstructure:"trim_seconds"`
-	AccumulateBuffer     bool   `mapstructure:"accumulate_buffer"`
+	WebSocketAddr string        `mapstructure:"websocket_addr"`
+	BufferSize    int           `mapstructure:"buffer_size"`
+	ChunkBytes    int           `mapstructure:"chunk_bytes"`
+	MaxBytes      int           `mapstructure:"max_bytes"`
+	TrimBytes     int           `mapstructure:"trim_bytes"`
+	SleepTime     time.Duration `mapstructure:"sleep_time"`
+	IsStream      bool          `mapstructure:"is_stream"`
 }
 
 func NewConfiguration(id string,
@@ -35,14 +36,13 @@ func NewConfiguration(id string,
 	runtimeConfiguration *runtime.Configuration) (*Configuration, error) {
 
 	newConfiguration := Configuration{
-		WebSocketAddr:        "",
-		DataType:             "",
-		BufferSize:           DefaultBufferSize,
-		SampleRate:           DefaultSampleRate,
-		ChunkDurationSeconds: DefaultChunkDurationSeconds,
-		MaxBufferSeconds:     DefaultMaxBufferSeconds,
-		TrimSeconds:          DefaultTrimSeconds,
-		AccumulateBuffer:     DefaultAccumulateBuffer,
+		WebSocketAddr: "",
+		BufferSize:    DefaultBufferSize,
+		ChunkBytes:    DefaultChunkBytes,
+		MaxBytes:      DefaultMaxBytes,
+		TrimBytes:     DefaultTrimBytes,
+		SleepTime:     DefaultSleepTime,
+		IsStream:      DefaultIsStream,
 	}
 
 	baseConfiguration, err := trigger.NewConfiguration(id, triggerConfiguration, runtimeConfiguration)
@@ -57,10 +57,6 @@ func NewConfiguration(id string,
 
 	if newConfiguration.WebSocketAddr == "" {
 		return nil, errors.New("websocket_addr is required")
-	}
-
-	if newConfiguration.DataType == "" {
-		return nil, errors.New("data_type is required")
 	}
 
 	return &newConfiguration, nil
