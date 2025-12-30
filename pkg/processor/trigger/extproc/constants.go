@@ -1,0 +1,19 @@
+/*
+SPDX-FileCopyrightText: © 2025 DSLab - Fondazione Bruno Kessler
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
+package extproc
+
+const (
+	REQUEST_PHASE_UNDETERMINED      = 0
+	REQUEST_PHASE_REQUEST_HEADERS   = 1
+	REQUEST_PHASE_REQUEST_BODY      = 2
+	REQUEST_PHASE_REQUEST_TRAILERS  = 3
+	REQUEST_PHASE_RESPONSE_HEADERS  = 4
+	REQUEST_PHASE_RESPONSE_BODY     = 5
+	REQUEST_PHASE_RESPONSE_TRAILERS = 6
+)
+
+const kContentLength = "Content-Length"
