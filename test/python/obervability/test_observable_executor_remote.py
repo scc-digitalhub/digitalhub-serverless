@@ -8,13 +8,8 @@ from os.path import dirname
 sys.path.insert(0,dirname(dirname(dirname(dirname(__file__)))))
 
 from pkg.processor.runtime.python.py.observable_executor import (
-    is_tracing_enabled,
-    is_metrics_enabled,
-    is_content_tracing_enabled,
     initialize_opentelemetry,
     execute_callable,
-    _process_input,
-    _process_output,
     OTE_TRACING_CONTENT,
 )
 from nuclio_sdk import Response, Event, Context
