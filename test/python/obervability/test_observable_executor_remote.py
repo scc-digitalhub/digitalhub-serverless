@@ -1,13 +1,13 @@
 import os
 import unittest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock
 import sys
-import tempfile
+from os.path import dirname
 
 # Add the py directory to sys.path to import observable_executor
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0,dirname(dirname(dirname(dirname(__file__)))))
 
-from observable_executor import (
+from pkg.processor.runtime.python.py.observable_executor import (
     is_tracing_enabled,
     is_metrics_enabled,
     is_content_tracing_enabled,
@@ -35,6 +35,7 @@ class TestObservableExecutor(unittest.TestCase):
         os.environ[OTE_TRACING_CONTENT] = 'true'
         os.environ["OTEL_SERVICE_NAME"] = "test-function"
         os.environ["OTEL_TRACES_EXPORTER"] = "otlp"
+        os.environ["OTEL_METRICS_EXPORTER"] = "otlp"
         os.environ["OTEL_EXPORTER_OTLP_PROTOCOL"] = "grpc"
         os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://localhost:4317"
         os.environ["OTEL_PROPAGATORS"] = "tracecontext,baggage"
