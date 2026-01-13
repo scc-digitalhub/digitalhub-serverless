@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: © 2025 DSLab - Fondazione Bruno Kessler
+#
+# SPDX-License-Identifier: Apache-2.0
+
+ARG BUILDPLATFORM=linux/amd64
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+
+FROM --platform=$BUILDPLATFORM golang:1.25 AS go-builder
+
+WORKDIR /src/digitalhub-serverless
+
+# deps first for caching
+COPY go.mod go.sum ./
+RUN go mod download
+
+# sources
+COPY . ./
+
+# Build processor (linux/amd64) with hardcoded metadata
+RUN set -euo pipefail; \
+    GOOS="${TARGETOS}"; \
+    GOARCH="${TARGETARCH}"; \
+    CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
+      go build \
+        -ldflags="-s -w \
+          -X github.com/v3io/version-go.gitCommit=unknown \
+          -X github.com/v3io/version-go.label=latest \
+          -X github.com/v3io/version-go.arch=${GOARCH}" \
+        -o /out/processor \
+        cmd/processor/main.go
+
+
+FROM scratch
+
+# Go artifacts
+COPY --from=go-builder /out/processor /layer/bin/processor

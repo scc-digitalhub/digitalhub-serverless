@@ -1,0 +1,93 @@
+# SPDX-FileCopyrightText: © 2025 DSLab - Fondazione Bruno Kessler
+#
+# SPDX-License-Identifier: Apache-2.0
+ARG PYTHON_VERSION=3.10
+
+ARG BUILDPLATFORM=linux/amd64
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+
+ARG NUCLIO_ARCH=amd64
+ARG NUCLIO_LABEL=latest
+
+ARG NUCLIO_UHTTPc_IMAGE=nuclio/uhttpc:0.0.1-amd64
+ARG NUCLIO_DOCKER_REPO=quay.io/nuclio
+ARG NUCLIO_DOCKER_IMAGE_TAG=1.13.2-amd64
+
+# --- Build processor binary ---
+FROM --platform=$BUILDPLATFORM golang:1.25 AS go-builder
+ARG TARGETOS
+ARG TARGETARCH
+ARG NUCLIO_LABEL
+WORKDIR /src/digitalhub-serverless
+
+# Cache go modules
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy sources
+COPY . ./
+
+# Compile processor
+RUN set -euo pipefail; \
+    GOOS="${TARGETOS}"; \
+    GOARCH="${TARGETARCH}"; \
+    CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
+      go build \
+        -ldflags="-s -w \
+          -X github.com/v3io/version-go.gitCommit=unknown \
+          -X github.com/v3io/version-go.label=${NUCLIO_LABEL} \
+          -X github.com/v3io/version-go.arch=${GOARCH}" \
+        -o /out/processor \
+        cmd/processor/main.go
+
+# --- artifacts (python packages + git) ---
+FROM gcr.io/iguazio/python:${PYTHON_VERSION} AS python-builder
+
+# Requirements file(s)
+COPY pkg/processor/runtime/python/py/requirements /requirements
+
+# Install digitalhub packages + dependencies
+ARG ver_sdk=0.15.0b1
+ARG ver_python=0.15.0b1
+ARG ver_container=0.15.0b1
+ARG ver_modelserve=0.15.0b1
+ARG ver_dbt=0.15.0b1
+ARG ver_hera=0.15.0b1
+ARG ver_flower=0.15.0b1
+RUN python -m pip install \
+      "digitalhub[full]==${ver_sdk}" \
+      "digitalhub-runtime-python==${ver_python}" \
+      "digitalhub-runtime-container==${ver_container}" \
+      "digitalhub-runtime-modelserve==${ver_modelserve}" \
+      "digitalhub-runtime-dbt==${ver_dbt}" \
+      "digitalhub-runtime-flower==${ver_flower}" \
+      "digitalhub-runtime-hera==${ver_hera}" \
+      --requirement /requirements/common.txt \
+      --target /package
+
+
+# --- nuclio onbuild ---
+FROM ${NUCLIO_DOCKER_REPO}/handler-builder-python-onbuild:${NUCLIO_DOCKER_IMAGE_TAG} AS onbuild
+
+# --- uhttpc ---
+FROM ${NUCLIO_UHTTPc_IMAGE} AS uhttpc
+
+# --- final aggregated layer image ---
+FROM scratch
+
+LABEL org.opencontainers.image.source=https://github.com/scc-digitalhub/digitalhub-serverless
+
+# Python handler
+COPY pkg/processor/runtime/python/py /layer/opt/nuclio/
+
+# Python packages (preinstalled)
+COPY --from=python-builder /package /layer/python
+
+# Other nuclio stuff from onbuild
+COPY --from=onbuild /home/nuclio/bin/py /layer/opt/nuclio
+COPY --from=onbuild /etc/nuclio/* /layer/etc/nuclio
+
+# Binaries used by handler container
+COPY --from=go-builder /out/processor /layer/usr/local/bin/processor
+COPY --from=uhttpc /home/nuclio/bin/uhttpc /layer/usr/local/bin/uhttpc
