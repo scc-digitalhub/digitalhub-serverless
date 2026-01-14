@@ -12,23 +12,23 @@ import (
 )
 
 const (
-	DefaultBufferSize = 4096
-	DefaultChunkBytes = 160000
-	DefaultMaxBytes   = 1440000
-	DefaultTrimBytes  = 1120000
-	DefaultSleepTime  = 20
-	DefaultIsStream   = false
+	DefaultBufferSize         = 4096
+	DefaultChunkBytes         = 160000
+	DefaultMaxBytes           = 1440000
+	DefaultTrimBytes          = 1120000
+	DefaultProcessingInterval = 2000
+	DefaultIsStream           = false
 )
 
 type Configuration struct {
 	trigger.Configuration
-	WebSocketAddr string        `mapstructure:"websocket_addr"`
-	BufferSize    int           `mapstructure:"buffer_size"`
-	ChunkBytes    int           `mapstructure:"chunk_bytes"`
-	MaxBytes      int           `mapstructure:"max_bytes"`
-	TrimBytes     int           `mapstructure:"trim_bytes"`
-	SleepTime     time.Duration `mapstructure:"sleep_time"`
-	IsStream      bool          `mapstructure:"is_stream"`
+	WebSocketAddr      string        `mapstructure:"websocket_addr"`
+	BufferSize         int           `mapstructure:"buffer_size"`
+	ChunkBytes         int           `mapstructure:"chunk_bytes"`
+	MaxBytes           int           `mapstructure:"max_bytes"`
+	TrimBytes          int           `mapstructure:"trim_bytes"`
+	ProcessingInterval time.Duration `mapstructure:"processing_interval"`
+	IsStream           bool          `mapstructure:"is_stream"`
 }
 
 func NewConfiguration(id string,
@@ -36,13 +36,13 @@ func NewConfiguration(id string,
 	runtimeConfiguration *runtime.Configuration) (*Configuration, error) {
 
 	newConfiguration := Configuration{
-		WebSocketAddr: "",
-		BufferSize:    DefaultBufferSize,
-		ChunkBytes:    DefaultChunkBytes,
-		MaxBytes:      DefaultMaxBytes,
-		TrimBytes:     DefaultTrimBytes,
-		SleepTime:     DefaultSleepTime,
-		IsStream:      DefaultIsStream,
+		WebSocketAddr:      "",
+		BufferSize:         DefaultBufferSize,
+		ChunkBytes:         DefaultChunkBytes,
+		MaxBytes:           DefaultMaxBytes,
+		TrimBytes:          DefaultTrimBytes,
+		ProcessingInterval: DefaultProcessingInterval,
+		IsStream:           DefaultIsStream,
 	}
 
 	baseConfiguration, err := trigger.NewConfiguration(id, triggerConfiguration, runtimeConfiguration)

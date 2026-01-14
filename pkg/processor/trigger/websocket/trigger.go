@@ -23,11 +23,15 @@ import (
 	"github.com/nuclio/nuclio/pkg/processor/worker"
 )
 
+// websocket_trigger implements a Nuclio trigger that accepts WebSocket connections
+// and forwards incoming data to workers, either in streaming or discrete mode.
 type websocket_trigger struct {
 	trigger.AbstractTrigger
 	configuration *Configuration
 
-	processor *DataProcessor
+	// either stream or discrete processor
+	streamProcessor   *DataProcessorStream
+	discreteProcessor *DataProcessorDiscrete
 
 	wsServer *http.Server
 	wsConn   *websocket.Conn
@@ -66,26 +70,33 @@ func newTrigger(
 	return ws_t, nil
 }
 
+// initialize processors and launches server + dispatcher goroutines
 func (ws_t *websocket_trigger) Start(_ functionconfig.Checkpoint) error {
-	ws_t.processor = NewDataProcessor(
-		ws_t.configuration.ChunkBytes,
-		ws_t.configuration.MaxBytes,
-		ws_t.configuration.TrimBytes,
-		ws_t.configuration.SleepTime,
-		ws_t.configuration.IsStream,
-	)
 
-	ws_t.processor.Start()
+	if ws_t.configuration.IsStream {
+		ws_t.streamProcessor = NewDataProcessorStream(
+			ws_t.configuration.ChunkBytes,
+			ws_t.configuration.MaxBytes,
+			ws_t.configuration.TrimBytes,
+		)
+		ws_t.streamProcessor.Start(time.Millisecond * time.Duration(ws_t.configuration.ProcessingInterval))
+	} else {
+		ws_t.discreteProcessor = NewDataProcessorDiscrete(time.Millisecond * time.Duration(ws_t.configuration.ProcessingInterval))
+		ws_t.discreteProcessor.Start()
+	}
 
+	// Goroutine that dispatches processed events to Nuclio workers
 	ws_t.wg.Add(1)
 	go ws_t.eventDispatcher()
 
+	// Goroutine that runs the HTTP/WebSocket server
 	ws_t.wg.Add(1)
 	go ws_t.startServer()
 
 	return nil
 }
 
+// create HTTP server and register WebSocket handler
 func (ws_t *websocket_trigger) startServer() {
 	defer ws_t.wg.Done()
 
@@ -100,6 +111,7 @@ func (ws_t *websocket_trigger) startServer() {
 	_ = ws_t.wsServer.ListenAndServe()
 }
 
+// upgrade HTTP connection to WebSocket and read incoming messages
 func (ws_t *websocket_trigger) handleWS(w http.ResponseWriter, r *http.Request) {
 	up := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	conn, err := up.Upgrade(w, r, nil)
@@ -119,10 +131,16 @@ func (ws_t *websocket_trigger) handleWS(w http.ResponseWriter, r *http.Request) 
 			}
 			return
 		}
-		ws_t.processor.manageBuffer(data)
+
+		if ws_t.configuration.IsStream {
+			ws_t.streamProcessor.Push(data)
+		} else {
+			ws_t.discreteProcessor.Push(data)
+		}
 	}
 }
 
+// wait for processed events and submit them to Nuclio workers
 func (ws_t *websocket_trigger) eventDispatcher() {
 	defer ws_t.wg.Done()
 
@@ -130,20 +148,30 @@ func (ws_t *websocket_trigger) eventDispatcher() {
 		select {
 		case <-ws_t.stop:
 			return
-		case event := <-ws_t.processor.Output():
-			ws_t.process(event)
+		// receive processed events from data processor
+		case ev := <-ws_t.getOutput():
+			ws_t.process(ev)
 		}
 	}
 }
 
-func (ws_t *websocket_trigger) process(event *Event) {
+// return the output channel of the active processor
+func (ws_t *websocket_trigger) getOutput() <-chan *Event {
+	if ws_t.configuration.IsStream {
+		return ws_t.streamProcessor.Output()
+	}
+	return ws_t.discreteProcessor.Output()
+}
+
+// submit event to Nuclio worker and send response back via WebSocket
+func (ws_t *websocket_trigger) process(ev *Event) {
 	w, err := ws_t.WorkerAllocator.Allocate(5 * time.Second)
 	if err != nil {
 		return
 	}
 	defer ws_t.WorkerAllocator.Release(w)
 
-	resp, err := ws_t.SubmitEventToWorker(ws_t.Logger, w, event)
+	resp, err := ws_t.SubmitEventToWorker(ws_t.Logger, w, ev)
 	if err != nil {
 		return
 	}
@@ -157,9 +185,14 @@ func (ws_t *websocket_trigger) process(event *Event) {
 	}
 }
 
+// shuts down processors, HTTP server, and background goroutines
 func (ws_t *websocket_trigger) Stop(bool) (functionconfig.Checkpoint, error) {
 	close(ws_t.stop)
-	ws_t.processor.Stop()
+	if ws_t.configuration.IsStream {
+		ws_t.streamProcessor.Stop()
+	} else {
+		ws_t.discreteProcessor.Stop()
+	}
 	if ws_t.wsServer != nil {
 		_ = ws_t.wsServer.Shutdown(context.TODO())
 	}

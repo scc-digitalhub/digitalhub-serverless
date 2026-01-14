@@ -8,7 +8,7 @@ export PYTHONPATH=$CURRENT_DIR/venv3.10/lib/python3.10/site-packages
 echo "PYTHONPATH: $PYTHONPATH"
 
 # set NUCLIO_PYTHON_WRAPPER_PATH
-export NUCLIO_PYTHON_WRAPPER_PATH=$CURRENT_DIR/test/websocket/_nuclio_wrapper.py
+export NUCLIO_PYTHON_WRAPPER_PATH=$CURRENT_DIR/test/websocket_discrete/_nuclio_wrapper.py
 echo "NUCLIO_PYTHON_WRAPPER_PATH: $NUCLIO_PYTHON_WRAPPER_PATH"
 
-go run ./cmd/processor --config=${CURRENT_DIR}/test/websocket/websocket-processor.yaml
+go run ./cmd/processor --config=${CURRENT_DIR}/test/websocket_discrete/ws_discrete-processor.yaml
