@@ -1,4 +1,10 @@
-nuclio-sdk
+digitalhub[full]==0.15.0b1
+digitalhub-runtime-python==0.15.0b1
+digitalhub-runtime-container==0.15.0b1
+digitalhub-runtime-modelserve==0.15.0b1
+digitalhub-runtime-dbt==0.15.0b1
+digitalhub-runtime-flower==0.15.0b1
+digitalhub-runtime-hera==0.15.0b1
 opentelemetry-api
 opentelemetry-sdk
 opentelemetry-exporter-otlp-proto-grpc

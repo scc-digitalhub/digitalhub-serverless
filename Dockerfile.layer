@@ -41,31 +41,12 @@ RUN set -euo pipefail; \
         -o /out/processor \
         cmd/processor/main.go
 
-# --- artifacts (python packages + git) ---
+# --- artifacts (python wheels) ---
 FROM gcr.io/iguazio/python:${PYTHON_VERSION} AS python-builder
 
-# Requirements file(s)
+# Download python wheels
 COPY pkg/processor/runtime/python/py/requirements /requirements
-
-# Install digitalhub packages + dependencies
-ARG ver_sdk=0.15.0b1
-ARG ver_python=0.15.0b1
-ARG ver_container=0.15.0b1
-ARG ver_modelserve=0.15.0b1
-ARG ver_dbt=0.15.0b1
-ARG ver_hera=0.15.0b1
-ARG ver_flower=0.15.0b1
-RUN python -m pip install \
-      "digitalhub[full]==${ver_sdk}" \
-      "digitalhub-runtime-python==${ver_python}" \
-      "digitalhub-runtime-container==${ver_container}" \
-      "digitalhub-runtime-modelserve==${ver_modelserve}" \
-      "digitalhub-runtime-dbt==${ver_dbt}" \
-      "digitalhub-runtime-flower==${ver_flower}" \
-      "digitalhub-runtime-hera==${ver_hera}" \
-      --requirement /requirements/common.txt \
-      --target /package
-
+RUN python -m pip download --dest /whl  --requirement /requirements/common.txt
 
 # --- nuclio onbuild ---
 FROM ${NUCLIO_DOCKER_REPO}/handler-builder-python-onbuild:${NUCLIO_DOCKER_IMAGE_TAG} AS onbuild
@@ -82,11 +63,10 @@ LABEL org.opencontainers.image.source=https://github.com/scc-digitalhub/digitalh
 COPY pkg/processor/runtime/python/py /layer/opt/nuclio/
 
 # Python packages (preinstalled)
-COPY --from=python-builder /package /layer/python
+COPY --from=python-builder /whl /layer/whl
 
 # Other nuclio stuff from onbuild
 COPY --from=onbuild /home/nuclio/bin/py /layer/opt/nuclio
-COPY --from=onbuild /etc/nuclio/* /layer/etc/nuclio
 
 # Binaries used by handler container
 COPY --from=go-builder /out/processor /layer/usr/local/bin/processor
