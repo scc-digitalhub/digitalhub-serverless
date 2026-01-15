@@ -46,14 +46,14 @@ FROM scratch
 
 LABEL org.opencontainers.image.source=https://github.com/scc-digitalhub/digitalhub-serverless
 
-# Python packages (preinstalled)
-COPY --from=python-builder /whl /layer/whl
-
 # Other nuclio stuff from onbuild
-COPY --from=onbuild /home/nuclio/bin/py /layer/opt/nuclio
+COPY --from=onbuild /home/nuclio/bin/py /opt/nuclio
 
 # Python handler
-COPY pkg/processor/runtime/python/py /layer/opt/nuclio/
+COPY pkg/processor/runtime/python/py /opt/nuclio/
+
+# Python packages (preinstalled)
+COPY --from=python-builder /whl /opt/nuclio/pywhl
 
 # Binaries used by handler container
-COPY --from=go-builder /out/processor /layer/usr/local/bin/processor
+COPY --from=go-builder /out/processor /opt/nuclio/processor
