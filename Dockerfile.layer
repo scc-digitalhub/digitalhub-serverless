@@ -1,0 +1,59 @@
+# SPDX-FileCopyrightText: © 2025 DSLab - Fondazione Bruno Kessler
+#
+# SPDX-License-Identifier: Apache-2.0
+ARG PYTHON_VERSION=3.10
+
+ARG BUILDPLATFORM=linux/amd64
+
+ARG NUCLIO_DOCKER_REPO=quay.io/nuclio
+ARG NUCLIO_DOCKER_IMAGE_TAG=1.13.2-amd64
+
+# --- Build processor binary ---
+FROM --platform=$BUILDPLATFORM golang:1.25 AS go-builder
+
+WORKDIR /src/digitalhub-serverless
+
+# Cache go modules
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy sources
+COPY . ./
+
+# Compile processor
+RUN set -euo pipefail; \
+    CGO_ENABLED=0 GOOS="linux" GOARCH="amd64" \
+      go build \
+        -ldflags="-s -w \
+          -X github.com/v3io/version-go.gitCommit=unknown \
+          -X github.com/v3io/version-go.label=latest \
+          -X github.com/v3io/version-go.arch=amd64" \
+        -o /out/processor \
+        cmd/processor/main.go
+
+# --- artifacts (python wheels) ---
+FROM gcr.io/iguazio/python:${PYTHON_VERSION} AS python-builder
+
+# Download python wheels
+COPY pkg/processor/runtime/python/py/requirements /requirements
+RUN python -m pip install wheel && python -m pip wheel -w /whl --requirement /requirements/common.txt
+
+# --- nuclio onbuild ---
+FROM ${NUCLIO_DOCKER_REPO}/handler-builder-python-onbuild:${NUCLIO_DOCKER_IMAGE_TAG} AS onbuild
+
+# --- final aggregated layer image ---
+FROM scratch
+
+LABEL org.opencontainers.image.source=https://github.com/scc-digitalhub/digitalhub-serverless
+
+# Other nuclio stuff from onbuild
+COPY --from=onbuild /home/nuclio/bin/py /opt/nuclio
+
+# Python handler
+COPY pkg/processor/runtime/python/py /opt/nuclio/
+
+# Python packages (preinstalled)
+COPY --from=python-builder /whl /opt/nuclio/pywhl
+
+# Binaries used by handler container
+COPY --from=go-builder /out/processor /opt/nuclio/processor
