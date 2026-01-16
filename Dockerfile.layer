@@ -32,7 +32,7 @@ RUN set -euo pipefail; \
         cmd/processor/main.go
 
 # --- artifacts (python wheels) ---
-FROM gcr.io/iguazio/python:${PYTHON_VERSION} AS python-builder
+FROM python:${PYTHON_VERSION}-slim AS python-builder
 
 # Download python wheels
 COPY pkg/processor/runtime/python/py/requirements /requirements
