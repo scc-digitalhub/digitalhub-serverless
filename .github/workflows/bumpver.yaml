@@ -25,6 +25,20 @@ jobs:
           sed -E -i "s/ver_${lib_name}=.+/ver_${lib_name}=${lib_vers}/1" Dockerfile/Dockerfile-base-3-11
           sed -E -i "s/ver_${lib_name}=.+/ver_${lib_name}=${lib_vers}/1" Dockerfile/Dockerfile-base-3-10
 
+      # Update requirements files
+      - name: Update requirements
+        run: |
+          lib_name=${{ github.event.client_payload.lib_name }}
+          lib_vers=${{ github.event.client_payload.lib_vers }}
+
+          if [ "$lib_name" = "sdk" ]; then
+            # Update digitalhub[full] version
+            sed -E -i "s/digitalhub\[full\]==.+/digitalhub[full]==${lib_vers}/" pkg/processor/runtime/python/py/requirements/common.txt
+          elif [ "$lib_name" = "python" ]; then
+            # Update digitalhub-runtime-python version
+            sed -E -i "s/digitalhub-runtime-python==.+/digitalhub-runtime-python==${lib_vers}/" pkg/processor/runtime/python/py/requirements/common.txt
+          fi
+
       # Commit modifications to Dockerfile
       - name: Commit changes
         run: |
