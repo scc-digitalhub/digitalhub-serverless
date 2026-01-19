@@ -18,7 +18,7 @@ func (h *mockHandler) HandleEvent(ctx *RequestContext, body []byte) (*EventRespo
 		return nil, h.err
 	}
 	return &EventResponse{
-		Status:  200,
+		Status:  0,
 		Headers: nil,
 		Body:    h.response,
 	}, nil
