@@ -14,9 +14,7 @@ spec:
         chunk_bytes: 160000
         max_bytes: 1440000
         trim_bytes: 1120000
-
         processing_interval: 20
         is_stream: true
-        # maxConnections 
-      maxWorkers: 1
+      # numWorkers: 2
 

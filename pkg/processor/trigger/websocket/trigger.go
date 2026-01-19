@@ -32,10 +32,13 @@ type websocket_trigger struct {
 	// either stream or discrete processor
 	streamProcessor   *DataProcessorStream
 	discreteProcessor *DataProcessorDiscrete
+	wsServer          *http.Server
+	wsLock            sync.Mutex
+	wsConn            *websocket.Conn
 
-	wsServer *http.Server
-	wsConn   *websocket.Conn
-	wsLock   sync.Mutex
+	maxClients int
+	connLock   sync.Mutex
+	conns      map[*websocket.Conn]struct{}
 
 	stop chan struct{}
 	wg   sync.WaitGroup
@@ -61,17 +64,28 @@ func newTrigger(
 		return nil, errors.Wrap(err, "abstract trigger")
 	}
 
+	maxClients := configuration.NumWorkers
 	ws_t := &websocket_trigger{
 		AbstractTrigger: abstract,
 		configuration:   configuration,
 		stop:            make(chan struct{}),
+		maxClients:      maxClients,
+		conns:           make(map[*websocket.Conn]struct{}),
 	}
 	ws_t.Trigger = ws_t
+
+	logger.InfoWith("WebSocket trigger created",
+		"maxClients", ws_t.maxClients,
+		"isStream", configuration.IsStream,
+	)
+
 	return ws_t, nil
 }
 
-// initialize processors and launches server + dispatcher goroutines
+// either stream or discrete processor
 func (ws_t *websocket_trigger) Start(_ functionconfig.Checkpoint) error {
+
+	ws_t.Logger.Info("WebSocket trigger starting")
 
 	if ws_t.configuration.IsStream {
 		ws_t.streamProcessor = NewDataProcessorStream(
@@ -81,7 +95,9 @@ func (ws_t *websocket_trigger) Start(_ functionconfig.Checkpoint) error {
 		)
 		ws_t.streamProcessor.Start(time.Millisecond * time.Duration(ws_t.configuration.ProcessingInterval))
 	} else {
-		ws_t.discreteProcessor = NewDataProcessorDiscrete(time.Millisecond * time.Duration(ws_t.configuration.ProcessingInterval))
+		ws_t.discreteProcessor = NewDataProcessorDiscrete(
+			time.Millisecond * time.Duration(ws_t.configuration.ProcessingInterval),
+		)
 		ws_t.discreteProcessor.Start()
 	}
 
@@ -108,29 +124,71 @@ func (ws_t *websocket_trigger) startServer() {
 		Handler: mux,
 	}
 
+	ws_t.Logger.InfoWith("WebSocket server listening",
+		"addr", ws_t.configuration.WebSocketAddr,
+	)
+
 	_ = ws_t.wsServer.ListenAndServe()
 }
 
 // upgrade HTTP connection to WebSocket and read incoming messages
 func (ws_t *websocket_trigger) handleWS(w http.ResponseWriter, r *http.Request) {
+
+	ws_t.connLock.Lock()
+	if len(ws_t.conns) >= ws_t.maxClients {
+		ws_t.Logger.WarnWith("Rejecting WebSocket connection: too many clients",
+			"active", len(ws_t.conns),
+			"max", ws_t.maxClients,
+		)
+		ws_t.connLock.Unlock()
+		http.Error(w, "too many websocket connections", http.StatusServiceUnavailable)
+		return
+	}
+	ws_t.connLock.Unlock()
+
 	up := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	conn, err := up.Upgrade(w, r, nil)
 	if err != nil {
+		ws_t.Logger.WarnWith("WebSocket upgrade failed", "err", err)
 		return
 	}
+
+	ws_t.connLock.Lock()
+	ws_t.conns[conn] = struct{}{}
+	ws_t.connLock.Unlock()
 
 	ws_t.wsLock.Lock()
 	ws_t.wsConn = conn
 	ws_t.wsLock.Unlock()
 
+	ws_t.Logger.InfoWith("WebSocket client connected",
+		"activeClients", len(ws_t.conns),
+	)
+
+	defer func() {
+		ws_t.connLock.Lock()
+		delete(ws_t.conns, conn)
+		ws_t.connLock.Unlock()
+
+		ws_t.Logger.InfoWith("WebSocket client disconnected",
+			"activeClients", len(ws_t.conns),
+		)
+
+		conn.Close()
+	}()
+
 	for {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
-			if err == io.EOF {
-				return
+			if err != io.EOF {
+				ws_t.Logger.WarnWith("WebSocket read error", "err", err)
 			}
 			return
 		}
+
+		ws_t.Logger.DebugWith("WebSocket message received",
+			"size", len(data),
+		)
 
 		if ws_t.configuration.IsStream {
 			ws_t.streamProcessor.Push(data)
@@ -144,9 +202,12 @@ func (ws_t *websocket_trigger) handleWS(w http.ResponseWriter, r *http.Request) 
 func (ws_t *websocket_trigger) eventDispatcher() {
 	defer ws_t.wg.Done()
 
+	ws_t.Logger.Info("Event dispatcher started")
+
 	for {
 		select {
 		case <-ws_t.stop:
+			ws_t.Logger.Info("Event dispatcher stopping")
 			return
 		// receive processed events from data processor
 		case ev := <-ws_t.getOutput():
@@ -155,7 +216,7 @@ func (ws_t *websocket_trigger) eventDispatcher() {
 	}
 }
 
-// return the output channel of the active processor
+// receive processed events from data processor
 func (ws_t *websocket_trigger) getOutput() <-chan *Event {
 	if ws_t.configuration.IsStream {
 		return ws_t.streamProcessor.Output()
@@ -165,14 +226,23 @@ func (ws_t *websocket_trigger) getOutput() <-chan *Event {
 
 // submit event to Nuclio worker and send response back via WebSocket
 func (ws_t *websocket_trigger) process(ev *Event) {
+	if ev == nil {
+		return
+	}
+
+	ws_t.Logger.InfoWith("Submitting event to worker",
+		"size", len(ev.body),
+	)
 	w, err := ws_t.WorkerAllocator.Allocate(5 * time.Second)
 	if err != nil {
+		ws_t.Logger.WarnWith("Worker allocation failed", "err", err)
 		return
 	}
 	defer ws_t.WorkerAllocator.Release(w)
 
 	resp, err := ws_t.SubmitEventToWorker(ws_t.Logger, w, ev)
 	if err != nil {
+		ws_t.Logger.WarnWith("SubmitEventToWorker failed", "err", err)
 		return
 	}
 

@@ -14,5 +14,5 @@ spec:
         processing_interval: 5000
         is_stream: false
         # maxConnections 
-      maxWorkers: 1
+      numWorkers: 2
 
