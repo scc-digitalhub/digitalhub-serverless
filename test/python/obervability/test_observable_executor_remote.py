@@ -28,7 +28,7 @@ class TestObservableExecutor(unittest.TestCase):
         mock_event.body = b'test body'
 
         os.environ[OTE_TRACING_CONTENT] = 'true'
-        os.environ["OTEL_SERVICE_NAME"] = "test-function"
+        os.environ["OTEL_SERVICE_NAME"] = "test-function3"
         os.environ["OTEL_TRACES_EXPORTER"] = "otlp"
         os.environ["OTEL_METRICS_EXPORTER"] = "otlp"
         os.environ["OTEL_EXPORTER_OTLP_PROTOCOL"] = "grpc"
@@ -47,6 +47,9 @@ class TestObservableExecutor(unittest.TestCase):
             execute_callable(function, event=mock_event, context=mock_ctx)
         except Exception as e:
             self.fail(f"execute_callable raised an exception: {e}")
+
+        print("Test complete")
+        
 
 
 if __name__ == '__main__':

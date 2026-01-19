@@ -22,8 +22,8 @@ When exposed, the Envoy proxy ``ProcessingRequest`` messages are handled by the 
 handler processes and transforms the incoming request, the outgoing response, or even controls whether the processing may be interrupted. More specifically, the
 following scenarios are available:
 
-- ``preprocessor`` handler: receives the Event object representing the incoming HTTP message (with URL, body, headers, etc) and returns the modified object to be passed to the upstream service. In case of processing error, the original message remains intact and passed to the upstream as is.
-- ``postprocessor`` handler: receives the Event object representing the outgoing HTTP message (with URL, body, headers, etc) and returns the modified object to be passed to the client.
+- ``preprocessor`` handler: receives the Event object representing the incoming HTTP message (with URL, body, headers, etc) and returns the modified object to be passed to the upstream service.  If response with Status > 0 is returned, it is sent as immediate response. In case of processing error, the original message remains intact and passed to the upstream as is.
+- ``postprocessor`` handler: receives the Event object representing the outgoing HTTP message (with URL, body, headers, etc) and returns the modified object to be passed to the client. If response with Status > 0 is returned, it is sent as  response with that status. 
 - ``observeprocessor`` handler: receives both the request and response objects and may perform some processing of that without, however, altering the flow. In fact, the execution of observe processor should be considered asynchronous and its results are ignored.
 - ``wrapprocessor`` handler: receives both the request and response objects and may perform some processing of ther messages. If upon request event it is necesary to prevent the propagation to the upstream service, the wrap processor should return the result and additionally append the ``X-Processing-Status`` header to signal that the processing should be terminated with the corresponding status code. This is necessary to disntinguish from the default status code returned by the processing chain. 
 

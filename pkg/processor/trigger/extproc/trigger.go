@@ -268,14 +268,21 @@ func (ep *extproc) HandleEvent(ctx *RequestContext, body []byte) (*EventResponse
 		return nil, err
 	}
 	if res != nil {
-		er.Status = res.StatusCode
-		er.Headers = make(map[string]string)
+		er.Status = int32(res.StatusCode)
+		er.Headers = make(map[string]HeaderValue)
 		for headerKey, headerValue := range res.Headers {
 			switch typedHeaderValue := headerValue.(type) {
 			case string:
-				er.Headers[headerKey] = typedHeaderValue
+				er.Headers[headerKey] = HeaderValue{
+					Value:    typedHeaderValue,
+					RawValue: []byte(typedHeaderValue),
+				}
 			case int:
-				er.Headers[headerKey] = strconv.Itoa(typedHeaderValue)
+				v := strconv.Itoa(typedHeaderValue)
+				er.Headers[headerKey] = HeaderValue{
+					Value:    v,
+					RawValue: []byte(v),
+				}
 			}
 		}
 		er.Body = res.Body

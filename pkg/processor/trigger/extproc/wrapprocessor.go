@@ -9,12 +9,6 @@ import (
 	"log"
 )
 
-type ImmediateResponse struct {
-	Status  int32
-	Headers map[string]HeaderValue
-	Body    []byte
-}
-
 /**
  * WrapProcessor pattern:
  * -  modifies request body or leave it unchanged and decide whether return response or continue
@@ -24,7 +18,7 @@ type WrapProcessor struct {
 	AbstractProcessor
 }
 
-func (s *WrapProcessor) wrapRequest(ctx *RequestContext, body []byte) ([]byte, *ImmediateResponse, error) {
+func (s *WrapProcessor) wrapRequest(ctx *RequestContext, body []byte) ([]byte, *EventResponse, error) {
 	res, err := s.Handler.HandleEvent(ctx, body)
 
 	// in case of error, return original body and the error
@@ -35,7 +29,7 @@ func (s *WrapProcessor) wrapRequest(ctx *RequestContext, body []byte) ([]byte, *
 	// if response is not nil and status > 0, return it as immediate response
 	if res != nil {
 		if res.Status > 0 {
-			ir := &ImmediateResponse{
+			ir := &EventResponse{
 				Status:  int32(res.Status),
 				Headers: make(map[string]HeaderValue),
 				Body:    res.Body,
