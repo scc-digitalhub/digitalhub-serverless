@@ -82,7 +82,7 @@ func newTrigger(
 	return ws_t, nil
 }
 
-// either stream or discrete processor
+// initialize processors and launches server + dispatcher goroutines
 func (ws_t *websocket_trigger) Start(_ functionconfig.Checkpoint) error {
 
 	ws_t.Logger.Info("WebSocket trigger starting")
