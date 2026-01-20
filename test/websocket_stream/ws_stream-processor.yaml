@@ -16,5 +16,5 @@ spec:
         trim_bytes: 1120000
         processing_interval: 20
         is_stream: true
-      # numWorkers: 2
+      numWorkers: 2
 

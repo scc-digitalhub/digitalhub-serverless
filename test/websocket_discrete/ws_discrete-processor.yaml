@@ -13,6 +13,5 @@ spec:
         websocket_addr: :9001
         processing_interval: 5000
         is_stream: false
-        # maxConnections 
       numWorkers: 2
 

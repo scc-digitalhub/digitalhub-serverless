@@ -186,10 +186,6 @@ func (ws_t *websocket_trigger) handleWS(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
-		ws_t.Logger.DebugWith("WebSocket message received",
-			"size", len(data),
-		)
-
 		if ws_t.configuration.IsStream {
 			ws_t.streamProcessor.Push(data)
 		} else {
