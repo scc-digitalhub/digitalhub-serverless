@@ -21,10 +21,14 @@ type ProcessingOptions struct {
 // Return default options, as not all the zero values are "correct".
 func NewDefaultOptions() *ProcessingOptions {
 	return &ProcessingOptions{
-		RequestIdHeaderName:  "x-request-id",
-		DecompressBodies:     true,
-		BufferStreamedBodies: false,
-		UpdateExtProcHeader:  false,
-		UpdateDurationHeader: false,
+		LogStream:                 false,
+		LogPhases:                 false,
+		RequestIdFallback:         "",
+		PerRequestBodyBufferBytes: 1024 * 1024, // 1 MB
+		RequestIdHeaderName:       "x-request-id",
+		DecompressBodies:          true,
+		BufferStreamedBodies:      true,
+		UpdateExtProcHeader:       false,
+		UpdateDurationHeader:      false,
 	}
 }
