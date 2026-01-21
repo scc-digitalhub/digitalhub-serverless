@@ -1,4 +1,4 @@
-digitalhub[full]==0.15.0b2
+digitalhub[full]==0.15.0b3
 digitalhub-runtime-python==0.15.0b1
 opentelemetry-api
 opentelemetry-sdk
