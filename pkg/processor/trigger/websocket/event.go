@@ -13,7 +13,7 @@ import (
 	"github.com/nuclio/nuclio-sdk-go"
 )
 
-// Event wraps audio packet data from RTSP stream
+// Event wraps a single message received over WebSocket
 type Event struct {
 	nuclio.AbstractEvent
 	body       []byte
@@ -21,12 +21,12 @@ type Event struct {
 	timestamp  time.Time
 }
 
-// GetContentType returns the content type of the audio packet
+// GetContentType returns the content type of the WebSocket message
 func (e *Event) GetContentType() string {
 	return "application/octet-stream"
 }
 
-// GetBody returns the audio packet data
+// GetBody returns the WebSocket message data
 func (e *Event) GetBody() []byte {
 	return e.body
 }
@@ -81,12 +81,12 @@ func (e *Event) GetHeaderInt(key string) (int, error) {
 	}
 }
 
-// GetMethod returns "rtsp" as the method
+// GetMethod returns "websocket" as the method
 func (e *Event) GetMethod() string {
-	return "rtsp"
+	return "websocket"
 }
 
-// GetPath returns empty path (not applicable for RTSP)
+// GetPath returns empty path (not applicable for WebSocket)
 func (e *Event) GetPath() string {
 	return ""
 }

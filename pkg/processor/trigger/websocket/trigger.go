@@ -260,9 +260,24 @@ func (ws_t *websocket_trigger) Stop(bool) (functionconfig.Checkpoint, error) {
 		ws_t.discreteProcessor.Stop()
 	}
 	if ws_t.wsServer != nil {
-		_ = ws_t.wsServer.Shutdown(context.TODO())
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = ws_t.wsServer.Shutdown(ctx)
 	}
-	ws_t.wg.Wait()
+
+	// Wait for goroutines with timeout
+	done := make(chan struct{})
+	go func() {
+		ws_t.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		// All goroutines finished
+	case <-time.After(5 * time.Second):
+		ws_t.Logger.Warn("Timeout waiting for goroutines to stop")
+	}
+
 	return nil, nil
 }
 
