@@ -95,7 +95,7 @@ func TestTypes(t *testing.T) {
 		assert.NotNil(t, config.ProcessingOptions)
 		assert.Equal(t, "x-request-id", config.ProcessingOptions.RequestIdHeaderName)
 		assert.True(t, config.ProcessingOptions.DecompressBodies)
-		assert.False(t, config.ProcessingOptions.BufferStreamedBodies)
+		assert.True(t, config.ProcessingOptions.BufferStreamedBodies)
 	})
 
 	t.Run("NewConfiguration_CustomGracefulShutdownTimeout", func(t *testing.T) {
