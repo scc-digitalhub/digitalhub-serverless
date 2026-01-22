@@ -95,6 +95,18 @@ func (m *mockRuntime) ProcessEvent(event nuclio.Event, functionLogger logger.Log
 	}, nil
 }
 
+func (m *mockRuntime) ProcessBatch(batch []nuclio.Event, functionLogger logger.Logger) ([]*runtime.ResponseWithErrors, error) {
+	responses := make([]*runtime.ResponseWithErrors, len(batch))
+	for i := range batch {
+		responses[i] = &runtime.ResponseWithErrors{
+			Response: nuclio.Response{
+				Body: []byte("mock batch response"),
+			},
+		}
+	}
+	return responses, nil
+}
+
 func (m *mockRuntime) GetFunctionLogger() logger.Logger {
 	return nil
 }
@@ -487,7 +499,6 @@ func (suite *WebsocketTriggerTestSuite) TestProcessWithWorkerAllocationFailure()
 	// Process should handle allocation failure gracefully
 	wsTrigger.process(testEvent) // Should not panic
 }
-
 
 func (suite *WebsocketTriggerTestSuite) TestGetConfig() {
 	triggerConfig := &functionconfig.Trigger{
