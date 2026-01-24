@@ -1,5 +1,5 @@
-digitalhub[full]==0.15.0b1
-digitalhub-runtime-python==0.15.0b1
+digitalhub[full]==0.15.0b5
+digitalhub-runtime-python==0.15.0b4
 opentelemetry-api
 opentelemetry-sdk
 opentelemetry-exporter-otlp-proto-grpc
