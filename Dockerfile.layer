@@ -1,15 +1,17 @@
 # SPDX-FileCopyrightText: © 2025 DSLab - Fondazione Bruno Kessler
 #
 # SPDX-License-Identifier: Apache-2.0
-ARG PYTHON_VERSION=3.10
+ARG PYTHON_VERSION=3.11
 
-ARG BUILDPLATFORM=linux/amd64
+ARG BUILDPLATFORM
 
 ARG NUCLIO_DOCKER_REPO=quay.io/nuclio
 ARG NUCLIO_DOCKER_IMAGE_TAG=1.13.2-amd64
 
 # --- Build processor binary ---
 FROM --platform=$BUILDPLATFORM golang:1.25 AS go-builder
+
+ARG BUILDPLATFORM
 
 WORKDIR /src/digitalhub-serverless
 
@@ -19,15 +21,16 @@ RUN go mod download
 
 # Copy sources
 COPY . ./
-
+RUN echo "platform $BUILDPLATFORM"
 # Compile processor
 RUN set -euo pipefail; \
-    CGO_ENABLED=0 GOOS="linux" GOARCH="amd64" \
+    ARCH=$(echo $BUILDPLATFORM | cut -d'/' -f2); \
+    CGO_ENABLED=0 GOOS="linux" GOARCH="$ARCH" \
       go build \
         -ldflags="-s -w \
           -X github.com/v3io/version-go.gitCommit=unknown \
           -X github.com/v3io/version-go.label=latest \
-          -X github.com/v3io/version-go.arch=amd64" \
+          -X github.com/v3io/version-go.arch=$ARCH" \
         -o /out/processor \
         cmd/processor/main.go
 
@@ -54,6 +57,8 @@ COPY pkg/processor/runtime/python/py /opt/nuclio/
 
 # Python packages (preinstalled)
 COPY --from=python-builder /whl /opt/nuclio/pywhl
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /opt/nuclio/uv/
 
 # Binaries used by handler container
 COPY --from=go-builder /out/processor /opt/nuclio/processor
