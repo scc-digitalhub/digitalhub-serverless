@@ -1,6 +1,8 @@
 package rtsp
 
 import (
+	"time"
+
 	"github.com/mitchellh/mapstructure"
 	"github.com/nuclio/errors"
 	"github.com/nuclio/nuclio/pkg/functionconfig"
@@ -9,23 +11,24 @@ import (
 )
 
 const (
-	DefaultBufferSize           = 4096
-	DefaultSampleRate           = 16000
-	DefaultChunkDurationSeconds = 5
-	DefaultMaxBufferSeconds     = 45
-	DefaultTrimSeconds          = 30
+	DefaultBufferSize         = 4096
+	DefaultChunkBytes         = 16000
+	DefaultMaxBytes           = 1440000
+	DefaultTrimBytes          = 1120000
+	DefaultProcessingInterval = 2000
 )
 
 type Configuration struct {
 	trigger.Configuration
 
-	RTSPURL              string                 `mapstructure:"rtsp_url"`
-	BufferSize           int                    `mapstructure:"buffer_size"`
-	SampleRate           int                    `mapstructure:"sample_rate"`
-	ChunkDurationSeconds int                    `mapstructure:"chunk_duration_seconds"`
-	MaxBufferSeconds     int                    `mapstructure:"max_buffer_seconds"`
-	TrimSeconds          int                    `mapstructure:"trim_seconds"`
-	Output               map[string]interface{} `mapstructure:"output"`
+	RTSPURL            string        `mapstructure:"rtsp_url"`
+	BufferSize         int           `mapstructure:"buffer_size"`
+	ChunkBytes         int           `mapstructure:"chunk_bytes"`
+	MaxBytes           int           `mapstructure:"max_bytes"`
+	TrimBytes          int           `mapstructure:"trim_bytes"`
+	ProcessingInterval time.Duration `mapstructure:"processing_interval"`
+
+	Output map[string]interface{} `mapstructure:"output"`
 }
 
 func NewConfiguration(id string,
@@ -34,12 +37,12 @@ func NewConfiguration(id string,
 
 	// Defaults
 	newConfiguration := Configuration{
-		RTSPURL:              "",
-		BufferSize:           DefaultMaxBufferSeconds,
-		SampleRate:           DefaultSampleRate,
-		ChunkDurationSeconds: DefaultChunkDurationSeconds,
-		MaxBufferSeconds:     DefaultMaxBufferSeconds,
-		TrimSeconds:          DefaultTrimSeconds,
+		RTSPURL:            "",
+		BufferSize:         DefaultBufferSize,
+		ChunkBytes:         DefaultChunkBytes,
+		MaxBytes:           DefaultMaxBytes,
+		TrimBytes:          DefaultTrimBytes,
+		ProcessingInterval: DefaultProcessingInterval,
 	}
 
 	// Base trigger config
@@ -59,13 +62,13 @@ func NewConfiguration(id string,
 		return nil, errors.New("rtspUrl is required")
 	}
 
-	if newConfiguration.BufferSize <= 0 {
-		newConfiguration.BufferSize = DefaultBufferSize
-	}
+	// if newConfiguration.BufferSize <= 0 {
+	// 	newConfiguration.BufferSize = DefaultBufferSize
+	// }
 
-	if newConfiguration.SampleRate <= 0 {
-		newConfiguration.SampleRate = DefaultSampleRate
-	}
+	// if newConfiguration.SampleRate <= 0 {
+	// 	newConfiguration.SampleRate = DefaultSampleRate
+	// }
 
 	return &newConfiguration, nil
 }

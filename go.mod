@@ -1,18 +1,21 @@
 module github.com/scc-digitalhub/digitalhub-serverless
 
-go 1.22.3
+go 1.25
 
 require (
 	github.com/envoyproxy/go-control-plane/envoy v1.32.3
+	github.com/gorilla/websocket v1.5.3
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/nuclio/errors v0.0.4
+	github.com/bluenviron/gortsplib/v5 v5.2.2
 	github.com/nuclio/logger v0.0.1
 	github.com/nuclio/nuclio v0.0.0-20240521080025-c2794eda6fe8
 	github.com/nuclio/nuclio-sdk-go v0.5.1
 	github.com/nuclio/zap v0.2.0
-	github.com/stretchr/testify v1.10.0
+	github.com/stretchr/testify v1.11.1
 	github.com/v3io/version-go v0.0.2
 	google.golang.org/grpc v1.67.1
+	github.com/pion/rtp v1.9.0
 )
 
 require (
@@ -30,6 +33,7 @@ require (
 	github.com/aws/aws-sdk-go v1.45.2 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/bluenviron/mediacommon/v2 v2.6.0 // indirect
 	github.com/bodgit/plumbing v1.2.0 // indirect
 	github.com/bodgit/sevenzip v1.3.0 // indirect
 	github.com/bodgit/windows v1.0.0 // indirect
@@ -70,7 +74,6 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.2.5 // indirect
 	github.com/googleapis/gax-go/v2 v2.12.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
-	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
@@ -108,6 +111,12 @@ require (
 	github.com/nwaples/rardecode/v2 v2.0.0-beta.2 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.17 // indirect
+	github.com/pion/logging v0.2.4 // indirect
+	github.com/pion/randutil v0.1.0 // indirect
+	github.com/pion/rtcp v1.2.16 // indirect
+	github.com/pion/sdp/v3 v3.0.17 // indirect
+	github.com/pion/srtp/v3 v3.0.9 // indirect
+	github.com/pion/transport/v3 v3.1.1 // indirect
 	github.com/pjbgf/sha1cd v0.3.0 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
@@ -144,17 +153,17 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.25.0 // indirect
 	go4.org v0.0.0-20200411211856-f5505b9728dd // indirect
-	golang.org/x/crypto v0.26.0 // indirect
+	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/exp v0.0.0-20230713183714-613f0c0eb8a1 // indirect
-	golang.org/x/mod v0.17.0 // indirect
-	golang.org/x/net v0.28.0 // indirect
+	golang.org/x/mod v0.30.0 // indirect
+	golang.org/x/net v0.48.0 // indirect
 	golang.org/x/oauth2 v0.22.0 // indirect
-	golang.org/x/sync v0.8.0 // indirect
-	golang.org/x/sys v0.24.0 // indirect
-	golang.org/x/term v0.23.0 // indirect
-	golang.org/x/text v0.17.0 // indirect
+	golang.org/x/sync v0.19.0 // indirect
+	golang.org/x/sys v0.39.0 // indirect
+	golang.org/x/term v0.38.0 // indirect
+	golang.org/x/text v0.32.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
-	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
+	golang.org/x/tools v0.39.0 // indirect
 	google.golang.org/api v0.138.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/genproto v0.0.0-20230803162519-f966b187b2e5 // indirect

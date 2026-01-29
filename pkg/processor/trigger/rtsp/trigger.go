@@ -1,6 +1,5 @@
 /*
-SPDX-FileCopyrightText: © 2025 DSLab - Fondazione Bruno Kessler
-
+SPDX-FileCopyrightText: © 2026 DSLab - Fondazione Bruno Kessler
 SPDX-License-Identifier: Apache-2.0
 */
 
@@ -9,14 +8,15 @@ package rtsp
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"os/exec"
 	"sync"
 	"time"
 
+	"github.com/bluenviron/gortsplib/v5"
+	"github.com/bluenviron/gortsplib/v5/pkg/base"
+	"github.com/bluenviron/gortsplib/v5/pkg/description"
+	"github.com/bluenviron/gortsplib/v5/pkg/format"
 	"github.com/nuclio/errors"
 	"github.com/nuclio/logger"
 	"github.com/nuclio/nuclio-sdk-go"
@@ -24,242 +24,236 @@ import (
 	"github.com/nuclio/nuclio/pkg/functionconfig"
 	"github.com/nuclio/nuclio/pkg/processor/trigger"
 	"github.com/nuclio/nuclio/pkg/processor/worker"
+	"github.com/pion/rtp"
 )
 
-type rtsp struct {
+// rtspTrigger streams media from a RTSP server, processes it in chunks,
+// sends to Nuclio workers, and optionally forwards output to a webhook.
+type rtspTrigger struct {
 	trigger.AbstractTrigger
 	configuration *Configuration
-	events        []Event
-	ffmpegCmd     *exec.Cmd
-	ffmpegStdout  io.ReadCloser
-	stopChan      chan struct{}
-	wg            sync.WaitGroup
-	processor     *AudioProcessor
-	webhookURL    string
+
+	client        *gortsplib.Client
+	dataProcessor *DataProcessorStream
+	pipeline      *MediaPipeline
+
+	stop       chan struct{}
+	wg         sync.WaitGroup
+	webhookURL string
 }
 
+// NewTrigger creates a new RTSP trigger
 func newTrigger(logger logger.Logger,
 	workerAllocator worker.Allocator,
 	configuration *Configuration,
 	restartTriggerChan chan trigger.Trigger) (trigger.Trigger, error) {
 
-	abstractTrigger, err := trigger.NewAbstractTrigger(logger,
+	abstract, err := trigger.NewAbstractTrigger(
+		logger,
 		workerAllocator,
 		&configuration.Configuration,
 		"async",
-		"rtsp_webhook",
+		"rtsp",
 		configuration.Name,
-		restartTriggerChan)
+		restartTriggerChan,
+	)
 	if err != nil {
-		return nil, errors.Wrap(err, "Failed to create abstract trigger")
+		return nil, errors.Wrap(err, "abstract trigger")
 	}
 
-	t := &rtsp{
-		AbstractTrigger: abstractTrigger,
+	t := &rtspTrigger{
+		AbstractTrigger: abstract,
 		configuration:   configuration,
-		stopChan:        make(chan struct{}),
+		stop:            make(chan struct{}),
 	}
 	t.Trigger = t
-	t.allocateEvents(1)
 
 	return t, nil
 }
 
-func (r *rtsp) Start(checkpoint functionconfig.Checkpoint) error {
-	r.Logger.InfoWith("Starting RTSP listener trigger",
-		"url", r.configuration.RTSPURL,
-		"bufferSize", r.configuration.BufferSize,
-		"sampleRate", r.configuration.SampleRate)
+// Start establishes RTSP connection, sets up the MediaPipeline, and starts processing
+func (t *rtspTrigger) Start(checkpoint functionconfig.Checkpoint) error {
+	t.Logger.InfoWith("Starting RTSP trigger", "url", t.configuration.RTSPURL)
 
-	fmt.Println(r.configuration.Output["kind"].(string))
-	if r.configuration.Output != nil {
-		kind, _ := r.configuration.Output["kind"].(string)
-		config, _ := r.configuration.Output["config"].(map[string]interface{})
-		if kind == "webhook" && config != nil {
-			r.webhookURL, _ = config["url"].(string)
-			r.Logger.InfoWith("Webhook output configured", "url", r.webhookURL)
+	// configure webhook if specified
+	if t.configuration.Output != nil {
+		if kind, ok := t.configuration.Output["kind"].(string); ok && kind == "webhook" {
+			if cfg, ok := t.configuration.Output["config"].(map[string]interface{}); ok {
+				if url, ok := cfg["url"].(string); ok {
+					t.webhookURL = url
+					t.Logger.InfoWith("Webhook output configured", "url", t.webhookURL)
+				}
+			}
 		}
 	}
 
-	r.ffmpegCmd = exec.Command("ffmpeg",
-		"-rtsp_transport", "tcp",
-		"-i", r.configuration.RTSPURL,
-		"-f", "s16le",
-		"-acodec", "pcm_s16le",
-		"-ac", "1",
-		"-ar", fmt.Sprintf("%d", r.configuration.SampleRate),
-		"pipe:1",
+	// streaming processor
+	t.dataProcessor = NewDataProcessorStream(
+		t.configuration.ChunkBytes,
+		t.configuration.MaxBytes,
+		t.configuration.TrimBytes,
 	)
-	r.ffmpegCmd.Stderr = os.Stderr
+	t.dataProcessor.Start(time.Millisecond * time.Duration(t.configuration.ProcessingInterval))
 
-	var err error
-	r.ffmpegStdout, err = r.ffmpegCmd.StdoutPipe()
+	// parse URL
+	u, err := base.ParseURL(t.configuration.RTSPURL)
 	if err != nil {
-		return errors.Wrap(err, "Failed to get FFmpeg stdout pipe")
+		return errors.Wrap(err, "parse RTSP URL")
 	}
 
-	if err := r.ffmpegCmd.Start(); err != nil {
-		return errors.Wrap(err, "Failed to start FFmpeg process")
+	// gortsplib client
+	t.client = &gortsplib.Client{
+		Scheme: "rtsp",
+		Host:   u.Host,
 	}
-	r.Logger.InfoWith("✓ FFmpeg started", "url", r.configuration.RTSPURL)
 
-	r.processor = NewAudioProcessor(
-		r.configuration.SampleRate,
-		r.configuration.ChunkDurationSeconds,
-		r.configuration.MaxBufferSeconds,
-		r.configuration.TrimSeconds,
-	)
+	if err := t.client.Start(); err != nil {
+		return errors.Wrap(err, "start RTSP client")
+	}
 
-	r.wg.Add(1)
-	go r.readAudioPackets()
+	desc, _, err := t.client.Describe(u)
+	if err != nil {
+		return errors.Wrap(err, "describe RTSP URL")
+	}
+
+	if err := t.client.SetupAll(desc.BaseURL, desc.Medias); err != nil {
+		return errors.Wrap(err, "setup all medias")
+	}
+
+	// setup media pipeline
+	t.pipeline, err = NewMediaPipeline(desc.Medias)
+	if err != nil {
+		return errors.Wrap(err, "create media pipeline")
+	}
+	if err := t.pipeline.StartFFmpeg(16000, 1); err != nil {
+		return errors.Wrap(err, "start FFmpeg")
+	}
+
+	// handle incoming RTP packets
+	t.client.OnPacketRTPAny(func(media *description.Media, forma format.Format, pkt *rtp.Packet) {
+		payload, err := t.pipeline.ProcessRTP(pkt, forma)
+		if err != nil {
+			t.Logger.WarnWith("RTP processing error", "err", err)
+			return
+		}
+		if payload != nil && t.pipeline.ffmpegStdin != nil {
+			_, _ = t.pipeline.ffmpegStdin.Write(payload)
+		}
+	})
+
+	// read PCM output from FFmpeg and push to processor
+	t.wg.Add(1)
+	go func() {
+		defer t.wg.Done()
+		buf := make([]byte, t.configuration.BufferSize)
+		for {
+			select {
+			case <-t.stop:
+				return
+			default:
+			}
+			n, err := t.pipeline.ffmpegStdout.Read(buf)
+			if err != nil {
+				if err == io.EOF {
+					t.Logger.Info("FFmpeg EOF")
+				} else {
+					t.Logger.WarnWith("FFmpeg read error", "err", err)
+				}
+				return
+			}
+			if n > 0 {
+				t.dataProcessor.Push(buf[:n])
+			}
+		}
+	}()
+
+	// start dispatcher to workers & webhook
+	t.wg.Add(1)
+	go t.dispatcher()
+
+	if _, err := t.client.Play(nil); err != nil {
+		return errors.Wrap(err, "play RTSP stream")
+	}
 
 	return nil
 }
 
-func (r *rtsp) readAudioPackets() {
-	defer r.wg.Done()
-
-	buf := make([]byte, r.configuration.BufferSize)
-	retryCount := 0
-	maxRetries := 5
-
+// dispatcher waits for processed chunks and sends them to workers
+func (t *rtspTrigger) dispatcher() {
+	defer t.wg.Done()
 	for {
 		select {
-		case <-r.stopChan:
-			r.Logger.InfoWith("✓ Audio packet reader stopped")
+		case <-t.stop:
+			t.Logger.Info("RTSP dispatcher stopping")
 			return
-		default:
-		}
-
-		n, err := r.ffmpegStdout.Read(buf)
-		if err != nil && err != io.EOF {
-			retryCount++
-			if retryCount > maxRetries {
-				r.Logger.ErrorWith("✗ Max retries exceeded, stopping reader", "error", err)
-				return
+		case ev := <-t.dataProcessor.Output():
+			if ev == nil {
+				continue
 			}
-			r.Logger.WarnWith("⚠ Read error, retrying", "error", err, "retry", retryCount)
-			time.Sleep(time.Second * time.Duration(retryCount))
-			continue
-		}
-		retryCount = 0
 
-		if n > 0 {
-			chunks := r.processor.AddPCM(buf[:n])
-
-			if len(chunks) > 0 {
-				r.processor.lock.Lock()
-				rollingBuffer := make([]byte, len(r.processor.buffer))
-				copy(rollingBuffer, r.processor.buffer)
-				r.processor.lock.Unlock()
-
-				workerInstance, err := r.WorkerAllocator.Allocate(time.Second * 5)
-				if err != nil {
-					r.Logger.WarnWith("⚠ Failed to allocate worker", "error", err)
-					continue
-				}
-
-				event := &Event{
-					body:      rollingBuffer,
-					timestamp: time.Now(),
-					attributes: map[string]interface{}{
-						"buffer-size": len(rollingBuffer),
-						"chunks":      len(chunks),
-					},
-				}
-
-				response, processErr := r.SubmitEventToWorker(r.Logger, workerInstance, event)
-				r.WorkerAllocator.Release(workerInstance)
-
-				if processErr != nil {
-					r.Logger.WarnWith("⚠ Failed to process event", "error", processErr)
-					continue
-				}
-
-				typedResponse, ok := response.(nuclio.Response)
-				if !ok {
-					r.Logger.Warn("⚠ Received non-nuclio response")
-					continue
-				}
-
-				if typedResponse.StatusCode != 200 {
-					r.Logger.WarnWith("⚠ Handler returned non-200 status", "statusCode", typedResponse.StatusCode)
-					continue
-				}
-
-				if r.webhookURL != "" {
-					r.postHandlerOutputToWebhook(typedResponse.Body)
-				}
-
+			workerInstance, err := t.WorkerAllocator.Allocate(5 * time.Second)
+			if err != nil {
+				t.Logger.WarnWith("Worker allocation failed", "err", err)
+				continue
 			}
-		}
 
-		if err == io.EOF {
-			r.Logger.InfoWith("ℹ FFmpeg stream ended")
-			return
+			resp, err := t.SubmitEventToWorker(t.Logger, workerInstance, ev)
+			t.WorkerAllocator.Release(workerInstance)
+			if err != nil {
+				t.Logger.WarnWith("SubmitEventToWorker failed", "err", err)
+				continue
+			}
+
+			if typedResp, ok := resp.(nuclio.Response); ok && t.webhookURL != "" {
+				t.postToWebhook(typedResp.Body)
+			}
 		}
 	}
 }
 
-func (r *rtsp) postHandlerOutputToWebhook(body []byte) {
+// postToWebhook forwards processed event to the configured webhook
+func (t *rtspTrigger) postToWebhook(body []byte) {
 	payload := map[string]interface{}{
-		"handler_output": string(body), // wrap the string in a JSON object
+		"handler_output": string(body),
 	}
 	jsonPayload, _ := json.Marshal(payload)
 
-	req, err := http.NewRequest("POST", r.webhookURL, bytes.NewBuffer(jsonPayload))
+	req, err := http.NewRequest("POST", t.webhookURL, bytes.NewBuffer(jsonPayload))
 	if err != nil {
-		r.Logger.WarnWith("⚠ Failed to create webhook POST request", "error", err)
+		t.Logger.WarnWith("Failed to create webhook request", "err", err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		r.Logger.WarnWith("⚠ Failed to POST handler output to webhook", "error", err)
+		t.Logger.WarnWith("Failed to POST webhook request", "err", err)
 		return
 	}
 	defer resp.Body.Close()
-
-	r.Logger.DebugWith("✓ Forwarded handler output to webhook", "statusCode", resp.StatusCode)
 }
 
-// Stop the trigger
-func (r *rtsp) Stop(force bool) (functionconfig.Checkpoint, error) {
-	r.Logger.DebugWith("Stopping RTSP listener trigger")
+// Stop closes RTSP client, stops FFmpeg, processor, and dispatcher
+func (t *rtspTrigger) Stop(force bool) (functionconfig.Checkpoint, error) {
+	close(t.stop)
 
-	close(r.stopChan)
-
-	done := make(chan struct{})
-	go func() {
-		r.wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		r.Logger.DebugWith("✓ Readers stopped gracefully")
-	case <-time.After(5 * time.Second):
-		r.Logger.WarnWith("⚠ Reader stop timeout, forcing termination")
+	if t.pipeline != nil {
+		t.pipeline.StopFFmpeg()
 	}
 
-	if r.ffmpegCmd != nil && r.ffmpegCmd.ProcessState == nil {
-		if err := r.ffmpegCmd.Process.Kill(); err != nil {
-			r.Logger.WarnWith("⚠ Failed to kill FFmpeg process", "error", err)
-		}
-		r.ffmpegCmd.Wait()
+	if t.client != nil {
+		t.client.Close()
 	}
 
-	r.Logger.InfoWith("✓ RTSP trigger stopped")
+	if t.dataProcessor != nil {
+		t.dataProcessor.Stop()
+	}
+
+	t.wg.Wait()
+	t.Logger.Info("RTSP trigger stopped")
 	return nil, nil
 }
 
-func (r *rtsp) GetConfig() map[string]interface{} {
-	return common.StructureToMap(r.configuration)
-}
-
-func (r *rtsp) allocateEvents(size int) {
-	r.events = make([]Event, size)
-	for i := 0; i < size; i++ {
-		r.events[i] = Event{}
-	}
+func (t *rtspTrigger) GetConfig() map[string]any {
+	return common.StructureToMap(t.configuration)
 }
