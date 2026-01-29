@@ -3,7 +3,81 @@
 [![license](https://img.shields.io/badge/license-Apache%202.0-blue)](https://github.com/scc-digitalhub/digitalhub-core/LICENSE) ![GitHub Release](https://img.shields.io/github/v/release/scc-digitalhub/digitalhub-serverless)
 ![Status](https://img.shields.io/badge/status-stable-gold)
 
-Nuclio "Serverless"-based framework for Job/serverless executions compatible with DH Core. The product is a set of python images that can be used to run serverless jobs in a Kubernetes cluster.
+Nuclio "Serverless"-based framework for Job/serverless executions compatible with DH Core. The product is a set of python images that can be used to run 
+- serverless jobs in a Kubernetes cluster (``job`` trigger).
+- functions as APIs in a Kubernetes cluster (based on Nuclio ``http`` trigger).
+- traffic processing tasks as extensions (``ext_proc``) to Envoy proxy as a service sidecar or standalone.
+
+## Job Trigger Configuration
+
+Trigger of type ``job`` extends the family of available triggers with the possibility to execute the container just ones with the predefined
+event defined in the trigger specification.  
+
+## Extproc Trigger Configuration
+
+Trigger of type ``extproc`` extends the family of available triggers with the functionality to handle envoy extProc message processing. See the corresponding
+[Envoy Proxy Specification](https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ext_proc_filter) for details of the integration configuration.
+
+When exposed, the Envoy proxy ``ProcessingRequest`` messages are handled by the specified runtime implementation. Based on the processor pattern, the 
+handler processes and transforms the incoming request, the outgoing response, or even controls whether the processing may be interrupted. More specifically, the
+following scenarios are available:
+
+- ``preprocessor`` handler: receives the Event object representing the incoming HTTP message (with URL, body, headers, etc) and returns the modified object to be passed to the upstream service.  If response with Status > 0 is returned, it is sent as immediate response. In case of processing error, the original message remains intact and passed to the upstream as is.
+- ``postprocessor`` handler: receives the Event object representing the outgoing HTTP message (with URL, body, headers, etc) and returns the modified object to be passed to the client. If response with Status > 0 is returned, it is sent as  response with that status. 
+- ``observeprocessor`` handler: receives both the request and response objects and may perform some processing of that without, however, altering the flow. In fact, the execution of observe processor should be considered asynchronous and its results are ignored.
+- ``wrapprocessor`` handler: receives both the request and response objects and may perform some processing of ther messages. If upon request event it is necesary to prevent the propagation to the upstream service, the wrap processor should return the result and additionally append the ``X-Processing-Status`` header to signal that the processing should be terminated with the corresponding status code. This is necessary to disntinguish from the default status code returned by the processing chain. 
+
+In order to see which processing phase is engaged, the request object is equipped with the ``processing-phase`` header with the following values:
+
+- process request headers: 1
+- process request body: 2
+- process response headers: 4
+- process response body: 5
+
+The trigger configuration is defined as follows:
+
+```yaml
+    myextproctrigger:
+      kind: extproc
+      attributes:
+        type: wrapprocessor                        
+        port: 5051                                 
+        gracefulShutdownTimeout: 15
+        maxConcurrentStreams: 100
+        processingOptions:
+          logStream: false
+          logPhases: false
+          requestIdHeaderName: x-request-id
+          bufferStreamedBodies: false
+          perRequestBodyBufferBytes: 102400
+          decompressBodies: true
+      maxWorkers: 4  
+      ...
+```
+
+where 
+
+- ``type`` defines the processing pattern (required)
+- ``port`` defines the gRPC port to expose (required)
+- ``gracefulShutdownTimeout`` timeout for the processor shutdown (15 sec)
+- ``maxConcurrentStreams`` for the gRPC server (100)
+- ``logStream`` and ``logPhases`` define whether to log the processing information for debugging (false)
+- ``requestIdHeaderName`` the name of the request id header as defined by the Envoy proxy (x-request-id)
+- ``bufferStreamedBodies`` whether streamed body should be bufffered with ``perRequestBodyBufferBytes`` specifying the buffer size (false, 0)
+- ``decompressBodies`` whether to decompress body for processing (true)
+
+### Testing
+
+To test the exproc functionality, it is possible to use the [Docker compose application](test/extproc/envoy-compose/docker-compose.yaml) including the Envoy proxy with the predefined [configuration](test/extproc/envoy-compose/envoy.yaml) and a simple upstream service. The Envoy configuration handles all the traffic with the 
+extproc gRPC server outside of the compose (``host.docker.internal``, port 5051).
+
+To run / debug the extproc processor, it is possible to run the predefined script: [test/extproc/run.sh](test/extproc/run.sh). The application
+relies on a Python runtime and therefore expects a preconfigured Python runtime with the Nuclio python SDK installed.
+
+Once you have the docker container and the application running, you can test it with the following curl command:
+```bash
+curl localhost:8080/resource -X POST -H 'Content-type: text/plain' -d 'hello' -s -vvv
+```
 
 ## Development
 

@@ -1,0 +1,95 @@
+/*
+SPDX-FileCopyrightText: © 2025 DSLab - Fondazione Bruno Kessler
+
+SPDX-License-Identifier: Apache-2.0
+*/
+package extproc
+
+import (
+	"log"
+)
+
+/**
+ * WrapProcessor pattern:
+ * -  modifies request body or leave it unchanged and decide whether return response or continue
+ * -  in case of error, logs it and leaves body unchanged
+**/
+type WrapProcessor struct {
+	AbstractProcessor
+}
+
+func (s *WrapProcessor) wrapRequest(ctx *RequestContext, body []byte) ([]byte, *EventResponse, error) {
+	res, err := s.Handler.HandleEvent(ctx, body)
+
+	// in case of error, return original body and the error
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// if response is not nil and status > 0, return it as immediate response
+	if res != nil {
+		if res.Status > 0 {
+			ir := &EventResponse{
+				Status:  int32(res.Status),
+				Headers: make(map[string]HeaderValue),
+				Body:    res.Body,
+			}
+			return nil, ir, nil
+		}
+		// otherwise, return modified body
+		return res.Body, nil, nil
+	}
+
+	// otherwise, return original body
+	return body, nil, nil
+}
+func (s *WrapProcessor) wrapResponse(ctx *RequestContext, body []byte) ([]byte, error) {
+	res, err := s.Handler.HandleEvent(ctx, body)
+	if err != nil {
+		return nil, err
+	}
+	return res.Body, nil
+}
+
+func (s *WrapProcessor) GetName() string {
+	return "wrapprocessor"
+}
+
+func (s *WrapProcessor) ProcessRequestHeaders(ctx *RequestContext, headers AllHeaders) error {
+	if !ctx.HasBody() {
+		_, res, err := s.wrapRequest(ctx, nil)
+		if err != nil {
+			log.Printf("Error: %v", err)
+		} else if res != nil {
+			return ctx.CancelRequest(res.Status, res.Headers, res.Body)
+		}
+	}
+
+	return ctx.ContinueRequest()
+}
+
+func (s *WrapProcessor) ProcessRequestBody(ctx *RequestContext, body []byte) error {
+	newBody, res, err := s.wrapRequest(ctx, body)
+	if err != nil {
+		log.Printf("Error: %v", err)
+	} else if res != nil {
+		return ctx.CancelRequest(res.Status, res.Headers, res.Body)
+	} else if newBody != nil {
+		ctx.ReplaceBodyChunk(newBody)
+	}
+	return ctx.ContinueRequest()
+}
+
+func (s *WrapProcessor) ProcessResponseHeaders(ctx *RequestContext, headers AllHeaders) error {
+	return ctx.ContinueRequest()
+}
+
+func (s *WrapProcessor) ProcessResponseBody(ctx *RequestContext, body []byte) error {
+	processed, err := s.wrapResponse(ctx, body)
+	if err != nil {
+		log.Printf("Error: %v", err)
+	} else {
+		ctx.ReplaceBodyChunk(processed)
+	}
+	return ctx.ContinueRequest()
+}
