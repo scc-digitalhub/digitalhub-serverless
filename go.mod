@@ -14,6 +14,7 @@ require (
 	github.com/nuclio/zap v0.3.1
 	github.com/pion/rtp v1.9.0
 	github.com/stretchr/testify v1.11.1
+	github.com/v3io/version-go v0.0.2
 	google.golang.org/grpc v1.78.0
 )
 
@@ -143,7 +144,6 @@ require (
 	github.com/v3io/scaler v0.8.0 // indirect
 	github.com/v3io/v3io-go v0.3.12 // indirect
 	github.com/v3io/v3io-go-http v0.0.1 // indirect
-	github.com/v3io/version-go v0.0.2 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.58.0 // indirect
 	github.com/vmihailenco/msgpack/v4 v4.3.12 // indirect
