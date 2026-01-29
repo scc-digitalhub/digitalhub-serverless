@@ -65,9 +65,9 @@ func TestGetRequest(t *testing.T) {
 	actualResponse := string(body)
 	expectedResponse := "Hello, world!"
 	if actualResponse != expectedResponse {
-		t.Fatalf("Response mismatch.\nExpected: %v\nAcutal: %v", expectedResponse, actualResponse)
+		t.Fatalf("Response mismatch.\nExpected: %v\nActual: %v", expectedResponse, actualResponse)
 	} else {
-		t.Logf("\nCorrect.\nExpected: %v\nAcutal: %v", expectedResponse, actualResponse)
+		t.Logf("\nCorrect.\nExpected: %v\nActual: %v", expectedResponse, actualResponse)
 	}
 	t.Logf("HTTP trigger responded with status: %d", resp.StatusCode)
 }
@@ -124,9 +124,9 @@ func TestPostTextRequest(t *testing.T) {
 	actualResponse := string(body)
 	expectedResponse := "Hello, world!"
 	if actualResponse != expectedResponse {
-		t.Fatalf("Response mismatch.\nExpected: %v\nAcutal: %v", expectedResponse, actualResponse)
+		t.Fatalf("Response mismatch.\nExpected: %v\nActual: %v", expectedResponse, actualResponse)
 	} else {
-		t.Logf("\nCorrect.\nExpected: %v\nAcutal: %v", expectedResponse, actualResponse)
+		t.Logf("\nCorrect.\nExpected: %v\nActual: %v", expectedResponse, actualResponse)
 	}
 	t.Logf("HTTP trigger responded with status: %d", resp.StatusCode)
 
@@ -152,9 +152,9 @@ func TestPostTextRequest(t *testing.T) {
 	actualResponse = string(body)
 	expectedResponse = "Hello, John!"
 	if actualResponse != expectedResponse {
-		t.Fatalf("Response mismatch.\nExpected: %v\nAcutal: %v", expectedResponse, actualResponse)
+		t.Fatalf("Response mismatch.\nExpected: %v\nActual: %v", expectedResponse, actualResponse)
 	} else {
-		t.Logf("\nCorrect.\nExpected: %v\nAcutal: %v", expectedResponse, actualResponse)
+		t.Logf("\nCorrect.\nExpected: %v\nActual: %v", expectedResponse, actualResponse)
 	}
 	t.Logf("HTTP trigger responded with status: %d", resp.StatusCode)
 }
@@ -225,7 +225,7 @@ func TestPostJSONRequest(t *testing.T) {
 	if !reflect.DeepEqual(expectedObj, actualObj) {
 		t.Fatalf("Response mismatch.\nExpected:\n%s\nActual:\n%s", string(expectedPretty), string(actualPretty))
 	} else {
-		t.Logf("\nCorrect.\nExpected: %v\nAcutal: %v", string(expectedPretty), string(actualPretty))
+		t.Logf("\nCorrect.\nExpected: %v\nActual: %v", string(expectedPretty), string(actualPretty))
 	}
 	t.Logf("HTTP trigger responded with status: %d", resp.StatusCode)
 }

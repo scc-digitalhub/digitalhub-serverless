@@ -9,23 +9,29 @@ import typing
 from pathlib import Path
 from typing import Any, Callable
 
+from digitalhub.context.api import get_context
 from digitalhub.entities.project.crud import get_project
 from digitalhub.entities.run.crud import get_run
-from digitalhub.context.api import get_context
 from digitalhub.runtimes.enums import RuntimeEnvVar
-from digitalhub_runtime_python.utils.configuration import import_function_and_init_from_source
+from digitalhub_runtime_python.utils.configuration import (
+    import_function_and_init_from_source,
+)
 from digitalhub_runtime_python.utils.inputs import compose_init, compose_inputs
-from digitalhub_runtime_python.utils.outputs import build_status, parse_outputs
+from digitalhub_runtime_python.utils.outputs import build_new_status, parse_outputs
 
 if typing.TYPE_CHECKING:
-    from digitalhub_runtime_python.entities.run.python_run.entity import RunPythonRun
+    from digitalhub_runtime_python.entities.run._base.entity import RunPythonRun
     from nuclio_sdk import Context, Event, Response
 
 
-DEFAULT_PY_FILE = "main.py"
+DEFAULT_PATH = Path("/shared")
 
 
-def execute_user_init(init_function: Callable, context: Context, run: RunPythonRun) -> None:
+def execute_user_init(
+    init_function: Callable,
+    context: Context,
+    run: RunPythonRun,
+) -> None:
     """
     Execute user init function.
 
@@ -37,10 +43,6 @@ def execute_user_init(init_function: Callable, context: Context, run: RunPythonR
         Nuclio context.
     run : RunPythonRun
         Run entity.
-
-    Returns
-    -------
-    None
     """
     init_params: dict = run.spec.to_dict().get("init_parameters", {})
     params = compose_init(init_function, context, init_params)
@@ -57,10 +59,6 @@ def init_context(context: Context) -> None:
     ----------
     context : Context
         Nuclio context.
-
-    Returns
-    -------
-    None
     """
     context.logger.info("Initializing context...")
 
@@ -73,11 +71,14 @@ def init_context(context: Context) -> None:
     ctx.root.mkdir(parents=True, exist_ok=True)
 
     # Get run
-    run: RunPythonRun = get_run(os.getenv(RuntimeEnvVar.RUN_ID.value), project=project_name)
+    run: RunPythonRun = get_run(
+        os.getenv(RuntimeEnvVar.RUN_ID.value),
+        project=project_name,
+    )
 
     # Set running context
     context.logger.info("Starting execution.")
-    run._start_execution()
+    run.start_execution()
 
     # Get inputs if they exist
     run.spec.inputs = run.inputs(as_dict=True)
@@ -87,9 +88,8 @@ def init_context(context: Context) -> None:
     # user dir (will be taken from run spec in the future),
     # default_py_file filename is "main.py", source is the
     # function source
-    path = Path("/shared")
     source = run.spec.to_dict().get("source")
-    func, init_function = import_function_and_init_from_source(path, source, DEFAULT_PY_FILE)
+    func, init_function = import_function_and_init_from_source(DEFAULT_PATH, source)
 
     # Set attributes
     setattr(context, "project", project)
@@ -145,46 +145,37 @@ def handler_job(context: Context, event: Event) -> Response:
         project: str = context.project.name
         context.logger.info("Executing function.")
         if hasattr(context.user_function, "__wrapped__"):
-            results = context.user_function(project, context.run.key, **func_args)
+            results: dict = context.user_function(project, context.run.key, **func_args)
         else:
             exec_result = context.user_function(**func_args)
-            results = parse_outputs(exec_result, list(spec.get("outputs", {})), project, context.run.key)
+            results = parse_outputs(exec_result, project, context.run.key)
+
         context.logger.info(f"Output results: {results}")
-    except Exception as e:
-        raise e
-    finally:
-        context.run._finish_execution()
 
-    ############################
-    # Set run status
-    ############################
-    try:
-        context.logger.info("Building run status.")
-        status = build_status(results, spec.get("outputs", {}))
-    except Exception as e:
-        raise e
-    finally:
-        context.run._finish_execution()
-
-    ############################
-    # Set status
-    ############################
-    try:
-        context.logger.info(f"Setting new run status: {status}")
+        context.logger.info("Setting run status.")
         context.run.refresh()
-        new_status = {**status, **context.run.status.to_dict()}
-        context.run._set_status(new_status)
+        new_status = {
+            **build_new_status(context.project.name, results),
+            **context.run.status.to_dict(),
+        }
+        context.run.set_status(new_status)
         context.run.save(update=True)
+
     except Exception as e:
         raise e
     finally:
-        context.run._finish_execution()
+        context.run.end_execution()
 
     ############################
     # End
     ############################
     context.logger.info("Done.")
-    return context.Response(body="OK", headers={}, content_type="text/plain", status_code=200)
+    return context.Response(
+        body="OK",
+        headers={},
+        content_type="text/plain",
+        status_code=200,
+    )
 
 
 def handler_serve(context: Context, event: Event) -> Any:
@@ -220,7 +211,7 @@ def handler_serve(context: Context, event: Event) -> Any:
     except Exception as e:
         raise e
     finally:
-        context.run._finish_execution()
+        context.run.end_execution()
 
     ############################
     # Call user function
@@ -231,4 +222,4 @@ def handler_serve(context: Context, event: Event) -> Any:
     except Exception as e:
         raise e
     finally:
-        context.run._finish_execution()
+        context.run.end_execution()

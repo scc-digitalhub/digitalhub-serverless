@@ -1,0 +1,51 @@
+name: Build and publish digitalhub-serverless layer
+
+on:
+  release:
+    types: [published]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/${{ github.repository }}/digitalhub-serverless
+
+jobs:
+  build-and-push-serverless-layer:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version: ["3.10", "3.11", "3.12", "3.13"]
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./
+          push: true
+          file: ./Dockerfile.layer
+          build-args: |
+            PYTHON_VERSION=${{ matrix.python_version }}
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ matrix.python_version }}-${{ github.event.release.tag_name }}
+            ${{ env.IMAGE_NAME }}:${{ matrix.python_version }}-latest
+          labels: ${{ steps.meta.outputs.labels }}

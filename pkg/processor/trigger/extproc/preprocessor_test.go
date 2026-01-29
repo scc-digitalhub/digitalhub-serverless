@@ -142,7 +142,7 @@ func TestPreProcessor_ProcessRequest(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockHandler.On("HandleEvent", ctx, body).Return(tt.response, tt.returnError).Once()
 
-			result, err := processor.processRequest(ctx, body)
+			result, _, err := processor.processRequest(ctx, body)
 			if tt.returnError != nil {
 				assert.Error(t, err)
 			} else {

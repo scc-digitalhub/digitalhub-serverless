@@ -14,7 +14,7 @@ func TestOptions(t *testing.T) {
 		// Verify default values
 		assert.Equal(t, "x-request-id", options.RequestIdHeaderName)
 		assert.True(t, options.DecompressBodies)
-		assert.False(t, options.BufferStreamedBodies)
+		assert.True(t, options.BufferStreamedBodies)
 		assert.False(t, options.UpdateExtProcHeader)
 		assert.False(t, options.UpdateDurationHeader)
 
@@ -22,7 +22,7 @@ func TestOptions(t *testing.T) {
 		assert.False(t, options.LogStream)
 		assert.False(t, options.LogPhases)
 		assert.Equal(t, "", options.RequestIdFallback)
-		assert.Equal(t, int64(0), options.PerRequestBodyBufferBytes)
+		assert.Equal(t, int64(1024*1024), options.PerRequestBodyBufferBytes)
 	})
 
 	t.Run("OptionsStructFields", func(t *testing.T) {

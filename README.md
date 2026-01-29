@@ -22,8 +22,8 @@ When exposed, the Envoy proxy ``ProcessingRequest`` messages are handled by the 
 handler processes and transforms the incoming request, the outgoing response, or even controls whether the processing may be interrupted. More specifically, the
 following scenarios are available:
 
-- ``preprocessor`` handler: receives the Event object representing the incoming HTTP message (with URL, body, headers, etc) and returns the modified object to be passed to the upstream service. In case of processing error, the original message remains intact and passed to the upstream as is.
-- ``postprocessor`` handler: receives the Event object representing the outgoing HTTP message (with URL, body, headers, etc) and returns the modified object to be passed to the client.
+- ``preprocessor`` handler: receives the Event object representing the incoming HTTP message (with URL, body, headers, etc) and returns the modified object to be passed to the upstream service.  If response with Status > 0 is returned, it is sent as immediate response. In case of processing error, the original message remains intact and passed to the upstream as is.
+- ``postprocessor`` handler: receives the Event object representing the outgoing HTTP message (with URL, body, headers, etc) and returns the modified object to be passed to the client. If response with Status > 0 is returned, it is sent as  response with that status. 
 - ``observeprocessor`` handler: receives both the request and response objects and may perform some processing of that without, however, altering the flow. In fact, the execution of observe processor should be considered asynchronous and its results are ignored.
 - ``wrapprocessor`` handler: receives both the request and response objects and may perform some processing of ther messages. If upon request event it is necesary to prevent the propagation to the upstream service, the wrap processor should return the result and additionally append the ``X-Processing-Status`` header to signal that the processing should be terminated with the corresponding status code. This is necessary to disntinguish from the default status code returned by the processing chain. 
 
@@ -74,6 +74,10 @@ extproc gRPC server outside of the compose (``host.docker.internal``, port 5051)
 To run / debug the extproc processor, it is possible to run the predefined script: [test/extproc/run.sh](test/extproc/run.sh). The application
 relies on a Python runtime and therefore expects a preconfigured Python runtime with the Nuclio python SDK installed.
 
+Once you have the docker container and the application running, you can test it with the following curl command:
+```bash
+curl localhost:8080/resource -X POST -H 'Content-type: text/plain' -d 'hello' -s -vvv
+```
 
 ## Development
 
@@ -91,17 +95,23 @@ Clone the repository and navigate to the `digitalhub-serverless` directory. The 
 make processor
 ```
 
-- Build the onbuild image (chooses the Python version from 3.9, 3.10, or 3.11. Modify the `Dockerfile/Dockerfile-onbuild-3-<ver>` file to change the SERVERLESS_DOCKER_REP variable to your Docker repository, e.g., `docker.io/yourusername`)
+- Build the base image (chooses the Python 3 version from 9, 10, 11 or 12)
 
 ```bash
-docker build -t python-onbuild-3-<ver> -f ./Dockerfile/Dockerfile-onbuild-3-<ver> -e =<ver> .
+docker build -t python-base-3-<ver> -f ./Dockerfile/Dockerfile-base-3-<ver> .
 ```
 
-- Build the runtime image  (Modify the `Dockerfile/Dockerfile-handler-3-<ver>` file to change the NUCLIO_ONBUILD_IMAGE variable point to the onbuild image you just built, e.g., `python-onbuild-3-<ver>`)
+- Build the onbuild image (Modify the `Dockerfile/Dockerfile-onbuild-3-<ver>` file to change the SERVERLESS_DOCKER_REP variable to your Docker repository, e.g., `docker.io/yourusername`)
+
+```bash
+docker build -t python-onbuild-3-<ver> -f ./Dockerfile/Dockerfile-onbuild-3-<ver> .
+```
+
+- Build the runtime image  (Modify the `Dockerfile/Dockerfile-handler-3-<ver>` file to change the NUCLIO_BASE_IMAGE and NUCLIO_ONBUILD_IMAGE variables that point to the base and onbuild image you just built, e.g., `python-onbuild-3-<ver>`)
 
 ```bash
 
-docker build -t python-runtime-3-<ver> -f ./Dockerfile/Dockerfile-handler-3-<ver> .
+docker build -t python-runtime-3-<ver> -f ./Dockerfile/Dockerfile-handler-3-<ver> --build-arg GIT_TAG=<some-tag> .
 ```
 
 ### Launch container

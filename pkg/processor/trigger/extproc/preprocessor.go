@@ -12,19 +12,35 @@ import (
 /**
  * PreProcessor pattern:
  * -  modifies request body or leave it unchanged
+ * -  if response with Status > 0 is returned, it is sent as immediate response
  * -  in case of error, logs it and leaves body unchanged
 **/
 type PreProcessor struct {
 	AbstractProcessor
 }
 
-func (s *PreProcessor) processRequest(ctx *RequestContext, body []byte) ([]byte, error) {
+func (s *PreProcessor) processRequest(ctx *RequestContext, body []byte) ([]byte, *EventResponse, error) {
 	res, err := s.Handler.HandleEvent(ctx, body)
+	// in case of error, return original body and the error
 	if err != nil {
-		return body, err
+		return body, nil, err
 	}
-	return res.Body, nil
+	// if response is not nil and status > 0, return it as immediate response
+	if res != nil {
+		if res.Status > 0 {
+			ir := &EventResponse{
+				Status:  int32(res.Status),
+				Headers: make(map[string]HeaderValue),
+				Body:    res.Body,
+			}
+			return nil, ir, nil
+		}
+		// otherwise, return modified body
+		return res.Body, nil, nil
+	}
 
+	// otherwise, return original body
+	return body, nil, nil
 }
 
 func (s *PreProcessor) GetName() string {
@@ -33,9 +49,11 @@ func (s *PreProcessor) GetName() string {
 
 func (s *PreProcessor) ProcessRequestHeaders(ctx *RequestContext, headers AllHeaders) error {
 	if !ctx.HasBody() {
-		_, err := s.processRequest(ctx, nil)
+		_, res, err := s.processRequest(ctx, nil)
 		if err != nil {
 			log.Printf("Error: %v", err)
+		} else if res != nil {
+			return ctx.CancelRequest(res.Status, res.Headers, res.Body)
 		}
 	}
 
@@ -43,11 +61,13 @@ func (s *PreProcessor) ProcessRequestHeaders(ctx *RequestContext, headers AllHea
 }
 
 func (s *PreProcessor) ProcessRequestBody(ctx *RequestContext, body []byte) error {
-	processed, err := s.processRequest(ctx, body)
+	newBody, res, err := s.processRequest(ctx, body)
 	if err != nil {
 		log.Printf("Error: %v", err)
-	} else {
-		ctx.ReplaceBodyChunk(processed)
+	} else if res != nil {
+		return ctx.CancelRequest(res.Status, res.Headers, res.Body)
+	} else if newBody != nil {
+		ctx.ReplaceBodyChunk(newBody)
 	}
 	return ctx.ContinueRequest()
 }

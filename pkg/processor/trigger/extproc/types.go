@@ -57,13 +57,6 @@ func NewConfiguration(id string,
 	if newConfiguration.Port == 0 {
 		return nil, errors.New("Port not specified")
 	}
-	if newConfiguration.Type == "" {
-		return nil, errors.Wrap(err, "Operator type not specified")
-	}
-
-	if newConfiguration.Port == 0 {
-		return nil, errors.New("Port not specified")
-	}
 
 	if newConfiguration.ProcessingOptions == nil {
 		newConfiguration.ProcessingOptions = NewDefaultOptions()

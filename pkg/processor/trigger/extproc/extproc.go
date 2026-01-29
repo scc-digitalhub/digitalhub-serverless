@@ -41,8 +41,8 @@ type RequestProcessor interface {
 }
 
 type EventResponse struct {
-	Status  int
-	Headers map[string]string
+	Status  int32
+	Headers map[string]HeaderValue
 	Body    []byte
 }
 
