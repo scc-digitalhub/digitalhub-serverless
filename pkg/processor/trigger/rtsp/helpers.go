@@ -8,58 +8,102 @@ package rtsp
 
 import (
 	"sync"
+	"time"
 )
 
-// AudioProcessor accumulates PCM audio into chunks and manages a rolling buffer
-type AudioProcessor struct {
+type DataProcessorStream struct {
 	lock       sync.Mutex
 	chunkBytes int
 	maxBytes   int
 	trimBytes  int
 	chunkBuf   []byte
 	buffer     []byte
+	newBytes   int
+	output     chan *Event
+	stop       chan struct{}
 }
 
-// NewAudioProcessor creates a new audio processor
-func NewAudioProcessor(sampleRate, chunkDurationSeconds, maxBufferSeconds, trimSeconds int) *AudioProcessor {
-	return &AudioProcessor{
-		chunkBytes: chunkDurationSeconds * sampleRate * 2, // 2 bytes per sample (16-bit)
-		maxBytes:   maxBufferSeconds * sampleRate * 2,
-		trimBytes:  trimSeconds * sampleRate * 2,
+func NewDataProcessorStream(
+	chunkBytes,
+	maxBytes,
+	trimBytes int,
+) *DataProcessorStream {
+	return &DataProcessorStream{
+		chunkBytes: chunkBytes,
+		maxBytes:   maxBytes,
+		trimBytes:  trimBytes,
 		chunkBuf:   []byte{},
 		buffer:     []byte{},
+		output:     make(chan *Event, 8),
+		stop:       make(chan struct{}),
 	}
 }
 
-// AddPCM adds PCM data to the processor and returns any complete chunks
-// Returns a slice of complete chunks (each as []byte)
-func (ap *AudioProcessor) AddPCM(pcm []byte) [][]byte {
-	ap.lock.Lock()
-	defer ap.lock.Unlock()
+func (dp *DataProcessorStream) Start(processingInterval time.Duration) {
+	go dp.loop(processingInterval)
+}
 
-	var chunks [][]byte
+func (dp *DataProcessorStream) Stop() {
+	close(dp.stop)
+}
 
-	// Append incoming data to temp buffer
-	ap.chunkBuf = append(ap.chunkBuf, pcm...)
+// append raw incoming data and convert it into fixed-size chunks.
+// Chunks are appended to rolling buffer.
+func (dp *DataProcessorStream) Push(data []byte) {
+	dp.lock.Lock()
+	defer dp.lock.Unlock()
 
-	// Extract complete chunks
-	for len(ap.chunkBuf) >= ap.chunkBytes {
-		// Get one complete chunk
-		chunk := make([]byte, ap.chunkBytes)
-		copy(chunk, ap.chunkBuf[:ap.chunkBytes])
-		ap.chunkBuf = ap.chunkBuf[ap.chunkBytes:]
+	dp.chunkBuf = append(dp.chunkBuf, data...)
 
-		// Add chunk to rolling buffer
-		ap.buffer = append(ap.buffer, chunk...)
-
-		// Trim buffer if it exceeds max size
-		if len(ap.buffer) > ap.maxBytes {
-			ap.buffer = ap.buffer[ap.trimBytes:]
+	for len(dp.chunkBuf) >= dp.chunkBytes {
+		chunk := make([]byte, dp.chunkBytes)
+		copy(chunk, dp.chunkBuf[:dp.chunkBytes])
+		dp.chunkBuf = dp.chunkBuf[dp.chunkBytes:]
+		dp.buffer = append(dp.buffer, chunk...)
+		if len(dp.buffer) > dp.maxBytes {
+			dp.buffer = dp.buffer[dp.trimBytes:]
 		}
+		dp.newBytes += len(chunk)
+	}
+}
 
-		// Add chunk to output
-		chunks = append(chunks, chunk)
+func (dp *DataProcessorStream) loop(processingInterval time.Duration) {
+	ticker := time.NewTicker(processingInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-dp.stop:
+			return
+		case <-ticker.C:
+			if ev := dp.tryEmit(); ev != nil {
+				dp.output <- ev
+			}
+		}
+	}
+}
+
+// emit an event only if enough new data has arrived
+// since last emission (at least one full chunk)
+func (dp *DataProcessorStream) tryEmit() *Event {
+	dp.lock.Lock()
+	defer dp.lock.Unlock()
+
+	if dp.newBytes < dp.chunkBytes {
+		return nil
 	}
 
-	return chunks
+	snapshot := make([]byte, len(dp.buffer))
+	copy(snapshot, dp.buffer)
+
+	dp.newBytes = 0
+
+	return &Event{
+		body:      snapshot,
+		timestamp: time.Now(),
+	}
+}
+
+func (dp *DataProcessorStream) Output() <-chan *Event {
+	return dp.output
 }
