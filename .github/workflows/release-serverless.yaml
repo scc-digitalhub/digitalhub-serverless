@@ -15,7 +15,6 @@ jobs:
       fail-fast: false
       matrix:
         python_version: ["3.10", "3.11", "3.12", "3.13"]
-        architecture: ["amd64", "arm64"]
 
     permissions:
       contents: read
@@ -50,11 +49,10 @@ jobs:
           context: ./
           push: true
           file: ./Dockerfile.layer
-          platforms: linux/${{ matrix.architecture }}
+          platforms: linux/amd64,linux/arm64
           build-args: |
             PYTHON_VERSION=${{ matrix.python_version }}
-            BUILDPLATFORM=linux/${{ matrix.architecture }}
           tags: |
-            ${{ env.IMAGE_NAME }}:${{ matrix.python_version }}-${{ matrix.architecture }}-${{ github.event.release.tag_name }}
-            ${{ env.IMAGE_NAME }}:${{ matrix.python_version }}-${{ matrix.architecture }}-latest
+            ${{ env.IMAGE_NAME }}:${{ matrix.python_version }}-${{ github.event.release.tag_name }}
+            ${{ env.IMAGE_NAME }}:${{ matrix.python_version }}-latest
           labels: ${{ steps.meta.outputs.labels }}

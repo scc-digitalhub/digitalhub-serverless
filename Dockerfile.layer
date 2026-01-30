@@ -3,15 +3,11 @@
 # SPDX-License-Identifier: Apache-2.0
 ARG PYTHON_VERSION=3.11
 
-ARG BUILDPLATFORM
-
 ARG NUCLIO_DOCKER_REPO=quay.io/nuclio
 ARG NUCLIO_DOCKER_IMAGE_TAG=1.13.2-amd64
 
 # --- Build processor binary ---
-FROM --platform=$BUILDPLATFORM golang:1.25 AS go-builder
-
-ARG BUILDPLATFORM
+FROM  golang:1.25 AS go-builder
 
 WORKDIR /src/digitalhub-serverless
 
@@ -21,21 +17,18 @@ RUN go mod download
 
 # Copy sources
 COPY . ./
-RUN echo "platform $BUILDPLATFORM"
 # Compile processor
 RUN set -euo pipefail; \
-    ARCH=$(echo $BUILDPLATFORM | cut -d'/' -f2); \
-    CGO_ENABLED=0 GOOS="linux" GOARCH="$ARCH" \
+    CGO_ENABLED=0 \
       go build \
         -ldflags="-s -w \
           -X github.com/v3io/version-go.gitCommit=unknown \
           -X github.com/v3io/version-go.label=latest \
-          -X github.com/v3io/version-go.arch=$ARCH" \
         -o /out/processor \
         cmd/processor/main.go
 
 # --- artifacts (python wheels) ---
-FROM --platform=$BUILDPLATFORM python:${PYTHON_VERSION}-slim AS python-builder
+FROM  python:${PYTHON_VERSION}-slim AS python-builder
 
 # Download python wheels
 COPY pkg/processor/runtime/python/py/requirements /requirements
@@ -50,7 +43,7 @@ FROM scratch
 LABEL org.opencontainers.image.source=https://github.com/scc-digitalhub/digitalhub-serverless
 
 # Other nuclio stuff from onbuild
-COPY --from=onbuild /home/nuclio/bin/py /opt/nuclio
+COPY /home/nuclio/bin/py /opt/nuclio
 
 # Python handler
 COPY pkg/processor/runtime/python/py /opt/nuclio/
