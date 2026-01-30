@@ -23,7 +23,7 @@ RUN set -euo pipefail; \
       go build \
         -ldflags="-s -w \
           -X github.com/v3io/version-go.gitCommit=unknown \
-          -X github.com/v3io/version-go.label=latest \
+          -X github.com/v3io/version-go.label=latest" \
         -o /out/processor \
         cmd/processor/main.go
 
