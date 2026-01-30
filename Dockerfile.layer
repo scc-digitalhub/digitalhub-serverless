@@ -28,7 +28,7 @@ RUN set -euo pipefail; \
         cmd/processor/main.go
 
 # --- artifacts (python wheels) ---
-FROM  python:${PYTHON_VERSION}-slim AS python-builder
+FROM python:${PYTHON_VERSION}-slim AS python-builder
 
 # Download python wheels
 COPY pkg/processor/runtime/python/py/requirements /requirements
@@ -43,7 +43,7 @@ FROM scratch
 LABEL org.opencontainers.image.source=https://github.com/scc-digitalhub/digitalhub-serverless
 
 # Other nuclio stuff from onbuild
-COPY /home/nuclio/bin/py /opt/nuclio
+COPY --from=onbuild /home/nuclio/bin/py /opt/nuclio
 
 # Python handler
 COPY pkg/processor/runtime/python/py /opt/nuclio/
