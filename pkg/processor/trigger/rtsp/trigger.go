@@ -6,10 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 package rtsp
 
 import (
-	"bytes"
-	"encoding/json"
 	"io"
-	"net/http"
 	"sync"
 	"time"
 
@@ -78,7 +75,7 @@ func (t *rtspTrigger) Start(checkpoint functionconfig.Checkpoint) error {
 	// configure webhook if specified
 	if t.configuration.Output != nil {
 		if kind, ok := t.configuration.Output["kind"].(string); ok && kind == "webhook" {
-			if cfg, ok := t.configuration.Output["config"].(map[string]interface{}); ok {
+			if cfg, ok := t.configuration.Output["config"].(map[string]any); ok {
 				if url, ok := cfg["url"].(string); ok {
 					t.webhookURL = url
 					t.Logger.InfoWith("Webhook output configured", "url", t.webhookURL)
@@ -209,28 +206,6 @@ func (t *rtspTrigger) dispatcher() {
 			}
 		}
 	}
-}
-
-// postToWebhook forwards processed event to the configured webhook
-func (t *rtspTrigger) postToWebhook(body []byte) {
-	payload := map[string]interface{}{
-		"handler_output": string(body),
-	}
-	jsonPayload, _ := json.Marshal(payload)
-
-	req, err := http.NewRequest("POST", t.webhookURL, bytes.NewBuffer(jsonPayload))
-	if err != nil {
-		t.Logger.WarnWith("Failed to create webhook request", "err", err)
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Logger.WarnWith("Failed to POST webhook request", "err", err)
-		return
-	}
-	defer resp.Body.Close()
 }
 
 // Stop closes RTSP client, stops FFmpeg, processor, and dispatcher
