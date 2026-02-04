@@ -67,6 +67,7 @@ import (
 	_ "github.com/nuclio/nuclio/pkg/processor/trigger/v3iostream"
 	_ "github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/trigger/extproc"
 	_ "github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/trigger/job"
+	_ "github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/trigger/mjpeg"
 	_ "github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/trigger/websocket"
 
 	// load all sinks
