@@ -10,6 +10,6 @@ spec:
     mjpeg:
       kind: mjpeg
       attributes:
-        url: "http://localhost:1984/api/stream.mjpeg?src=audio"
+        url: "http://77.222.181.11:8080/mjpg/video.mjpg"
         processing_factor: 1
       maxWorkers: 4  
