@@ -6,7 +6,6 @@ SPDX-License-Identifier: Apache-2.0
 package rtsp
 
 import (
-	"io"
 	"sync"
 	"time"
 
@@ -24,8 +23,7 @@ import (
 	"github.com/pion/rtp"
 )
 
-// rtspTrigger streams media from a RTSP server, processes it in chunks,
-// sends to Nuclio workers, and optionally forwards output to a webhook.
+// rtspTrigger streams audio from a RTSP server and sends continuous PCM to Nuclio workers.
 type rtspTrigger struct {
 	trigger.AbstractTrigger
 	configuration *Configuration
@@ -68,7 +66,7 @@ func newTrigger(logger logger.Logger,
 	return t, nil
 }
 
-// Start establishes RTSP connection, sets up the MediaPipeline, and starts processing
+// Start establishes RTSP connection and starts processing LPCM audio
 func (t *rtspTrigger) Start(checkpoint functionconfig.Checkpoint) error {
 	t.Logger.InfoWith("Starting RTSP trigger", "url", t.configuration.RTSPURL)
 
@@ -117,52 +115,23 @@ func (t *rtspTrigger) Start(checkpoint functionconfig.Checkpoint) error {
 		return errors.Wrap(err, "setup all medias")
 	}
 
-	// setup media pipeline
-	t.pipeline, err = NewMediaPipeline(desc.Medias)
+	// setup media pipeline (LPCM depacketizers)
+	t.pipeline, err = NewMediaPipeline(*t, desc.Medias)
 	if err != nil {
 		return errors.Wrap(err, "create media pipeline")
 	}
-	if err := t.pipeline.StartFFmpeg(16000, 1); err != nil {
-		return errors.Wrap(err, "start FFmpeg")
-	}
 
-	// handle incoming RTP packets
+	// handle incoming RTP packets using depacketizer
 	t.client.OnPacketRTPAny(func(media *description.Media, forma format.Format, pkt *rtp.Packet) {
-		payload, err := t.pipeline.ProcessRTP(pkt, forma)
+		payload, err := t.pipeline.ProcessRTP(*t, pkt, forma)
 		if err != nil {
 			t.Logger.WarnWith("RTP processing error", "err", err)
 			return
 		}
-		if payload != nil && t.pipeline.ffmpegStdin != nil {
-			_, _ = t.pipeline.ffmpegStdin.Write(payload)
+		if payload != nil {
+			t.dataProcessor.Push(payload)
 		}
 	})
-
-	// read PCM output from FFmpeg and push to processor
-	t.wg.Add(1)
-	go func() {
-		defer t.wg.Done()
-		buf := make([]byte, t.configuration.BufferSize)
-		for {
-			select {
-			case <-t.stop:
-				return
-			default:
-			}
-			n, err := t.pipeline.ffmpegStdout.Read(buf)
-			if err != nil {
-				if err == io.EOF {
-					t.Logger.Info("FFmpeg EOF")
-				} else {
-					t.Logger.WarnWith("FFmpeg read error", "err", err)
-				}
-				return
-			}
-			if n > 0 {
-				t.dataProcessor.Push(buf[:n])
-			}
-		}
-	}()
 
 	// start dispatcher to workers & webhook
 	t.wg.Add(1)
@@ -208,13 +177,9 @@ func (t *rtspTrigger) dispatcher() {
 	}
 }
 
-// Stop closes RTSP client, stops FFmpeg, processor, and dispatcher
+// Stop closes RTSP client, stops processor and dispatcher
 func (t *rtspTrigger) Stop(force bool) (functionconfig.Checkpoint, error) {
 	close(t.stop)
-
-	if t.pipeline != nil {
-		t.pipeline.StopFFmpeg()
-	}
 
 	if t.client != nil {
 		t.client.Close()
