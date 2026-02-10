@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	DefaultBufferSize         = 4096
-	DefaultChunkBytes         = 16000
+	DefaultBufferSize = 4096
+	DefaultChunkBytes = 16000
+	// DefaultChunkBytes         = 3200
 	DefaultMaxBytes           = 1440000
 	DefaultTrimBytes          = 1120000
 	DefaultProcessingInterval = 2000
