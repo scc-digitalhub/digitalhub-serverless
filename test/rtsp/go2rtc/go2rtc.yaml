@@ -1,7 +1,0 @@
-streams:
-  mystream:
-    # - rtsp://host.docker.internal:8554/mystream
-    # - ffmpeg:/config/male_0_kmh.mp3#audio=pcmu
-    # - ffmpeg:/config/male_0_kmh.mp3#audio=pcml/16000
-    # - ffmpeg:/config/male_0_kmh.mp3#audio=pcml/16000
-    - ffmpeg:/config/output.wav#audio=pcm/16000

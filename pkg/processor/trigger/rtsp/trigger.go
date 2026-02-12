@@ -116,14 +116,14 @@ func (t *rtspTrigger) Start(checkpoint functionconfig.Checkpoint) error {
 	}
 
 	// setup media pipeline (LPCM depacketizers)
-	t.pipeline, err = NewMediaPipeline(*t, desc.Medias)
+	t.pipeline, err = NewMediaPipeline(t, desc.Medias)
 	if err != nil {
 		return errors.Wrap(err, "create media pipeline")
 	}
 
 	// handle incoming RTP packets using depacketizer
 	t.client.OnPacketRTPAny(func(media *description.Media, forma format.Format, pkt *rtp.Packet) {
-		payload, err := t.pipeline.ProcessRTP(*t, pkt, forma)
+		payload, err := t.pipeline.ProcessRTP(pkt, forma)
 		if err != nil {
 			t.Logger.WarnWith("RTP processing error", "err", err)
 			return

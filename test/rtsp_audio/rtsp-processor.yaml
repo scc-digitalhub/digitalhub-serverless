@@ -11,8 +11,6 @@ spec:
       kind: rtsp
       attributes:
         rtsp_url: rtsp://localhost:8554/mystream
-        # rtsp_url: rtsp://host.docker.internal:8554/mystream
-        # processing_interval: 2000
         output:
           kind: webhook
           config:

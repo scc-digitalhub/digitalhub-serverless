@@ -30,6 +30,10 @@ type DataProcessorStream struct {
 	stop       chan struct{}
 }
 
+type MediaPipeline struct {
+	depacketizers map[uint8]any
+}
+
 func NewDataProcessorStream(
 	chunkBytes, maxBytes, trimBytes int,
 ) *DataProcessorStream {
@@ -109,11 +113,7 @@ func (dp *DataProcessorStream) Output() <-chan *Event {
 }
 
 // MediaPipeline handles LPCM depacketizers
-type MediaPipeline struct {
-	depacketizers map[uint8]any
-}
-
-func NewMediaPipeline(t rtspTrigger, medias []*description.Media) (*MediaPipeline, error) {
+func NewMediaPipeline(t *rtspTrigger, medias []*description.Media) (*MediaPipeline, error) {
 	mp := &MediaPipeline{
 		depacketizers: make(map[uint8]any),
 	}
@@ -122,7 +122,6 @@ func NewMediaPipeline(t rtspTrigger, medias []*description.Media) (*MediaPipelin
 		for _, forma := range media.Formats {
 			switch f := forma.(type) {
 			case *format.LPCM:
-				t.Logger.Info("TEST 111", forma)
 				dep, err := f.CreateDecoder()
 				if err != nil {
 					t.Logger.WarnWith("Failed to create LPCM decoder", "err", err)
@@ -132,12 +131,11 @@ func NewMediaPipeline(t rtspTrigger, medias []*description.Media) (*MediaPipelin
 			}
 		}
 	}
-
 	return mp, nil
 }
 
 // ProcessRTP decodes RTP packets using the depacketizer
-func (mp *MediaPipeline) ProcessRTP(t rtspTrigger, pkt *rtp.Packet, forma format.Format) ([]byte, error) {
+func (mp *MediaPipeline) ProcessRTP(pkt *rtp.Packet, forma format.Format) ([]byte, error) {
 	dep, ok := mp.depacketizers[forma.PayloadType()]
 	if !ok {
 		// fallback: push payload directly
@@ -148,22 +146,32 @@ func (mp *MediaPipeline) ProcessRTP(t rtspTrigger, pkt *rtp.Packet, forma format
 	case interface {
 		Decode(*rtp.Packet) ([]byte, error)
 	}:
-		// t.Logger.Info("TEST 222")
 		payload, err := d.Decode(pkt)
 		if err != nil {
-			t.Logger.Info("TEST 555")
 			return nil, err
 		}
 		if len(payload) == 0 {
-			t.Logger.Info("TEST 666")
 			return nil, nil
 		}
+		payload = convertBigEndianToLittleEndian(payload)
 		return payload, nil
 	default:
-		t.Logger.Info("TEST 000000000")
-
 		return pkt.Payload, nil
 	}
+}
+
+func convertBigEndianToLittleEndian(data []byte) []byte {
+	converted := make([]byte, len(data))
+	for i := 0; i < len(data)-1; i += 2 {
+		// Swap bytes: [MSB, LSB] -> [LSB, MSB]
+		converted[i] = data[i+1]
+		converted[i+1] = data[i]
+	}
+	// Handle odd byte count (shouldn't happen with 16-bit audio)
+	if len(data)%2 != 0 {
+		converted[len(data)-1] = data[len(data)-1]
+	}
+	return converted
 }
 
 // postToWebhook forwards processed event to the configured webhook
