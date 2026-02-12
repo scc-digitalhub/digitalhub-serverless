@@ -2,7 +2,6 @@ services:
   go2rtc:
     image: alexxit/go2rtc:latest
     container_name: go2rtc_test
-    # network_mode: host
     ports:
       - "1984:1984"
       - "8554:8554"
@@ -10,7 +9,3 @@ services:
     volumes:
       - ./go2rtc:/config
     restart: unless-stopped
-    # ports:
-    #   - "1984:1984"
-    #   - "8554:8554"
-    #   - "8555:8555"

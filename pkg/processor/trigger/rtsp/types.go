@@ -11,9 +11,8 @@ import (
 )
 
 const (
-	DefaultBufferSize = 4096
-	DefaultChunkBytes = 16000
-	// DefaultChunkBytes         = 3200
+	DefaultBufferSize         = 4096
+	DefaultChunkBytes         = 16000
 	DefaultMaxBytes           = 1440000
 	DefaultTrimBytes          = 1120000
 	DefaultProcessingInterval = 2000
@@ -29,7 +28,7 @@ type Configuration struct {
 	TrimBytes          int           `mapstructure:"trim_bytes"`
 	ProcessingInterval time.Duration `mapstructure:"processing_interval"`
 
-	Output map[string]interface{} `mapstructure:"output"`
+	Output map[string]any `mapstructure:"output"`
 }
 
 func NewConfiguration(id string,
@@ -62,14 +61,6 @@ func NewConfiguration(id string,
 	if newConfiguration.RTSPURL == "" {
 		return nil, errors.New("rtspUrl is required")
 	}
-
-	// if newConfiguration.BufferSize <= 0 {
-	// 	newConfiguration.BufferSize = DefaultBufferSize
-	// }
-
-	// if newConfiguration.SampleRate <= 0 {
-	// 	newConfiguration.SampleRate = DefaultSampleRate
-	// }
 
 	return &newConfiguration, nil
 }
