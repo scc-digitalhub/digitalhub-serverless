@@ -5,7 +5,7 @@ FROM python:3.12-slim
 
 LABEL org.opencontainers.image.source=https://github.com/scc-digitalhub/digitalhub-serverless
 
-ARG ver_sdk=0.15.0b7
+ARG ver_sdk=0.15.0b8
 ARG ver_python=0.15.0b5
 ARG ver_container=0.15.0b2
 ARG ver_modelserve=0.15.0b6
