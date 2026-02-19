@@ -6,55 +6,19 @@ from __future__ import annotations
 
 import os
 import typing
-from importlib import import_module
 from typing import Any, Callable
 
 from digitalhub.context.api import get_context
 from digitalhub.entities.project.crud import get_project
 from digitalhub.entities.run.crud import get_run
 from digitalhub.runtimes.enums import RuntimeEnvVar
+from digitalhub_runtime_python.utils.configuration import import_function_and_init_from_source
 from digitalhub_runtime_python.utils.inputs import compose_init, compose_inputs
 from digitalhub_runtime_python.utils.outputs import build_new_status, parse_outputs
 
 if typing.TYPE_CHECKING:
     from digitalhub_runtime_python.entities.run._base.entity import RunPythonRun
     from nuclio_sdk import Context, Event, Response
-
-
-def import_function_and_init_from_source(
-    source_spec: dict,
-) -> tuple[Callable, Callable | None]:
-    """
-    Import main function and optional init function from source.
-
-    Parameters
-    ----------
-    source_spec : dict
-        Function source spec.
-
-    Returns
-    -------
-    tuple
-        Main function and optional init function.
-    """
-    # Get function handler and import main function
-    handler = source_spec.get("handler")
-    function_module, function_name = handler.split(":")
-
-    if function_module == "":
-        function_module = "main"
-
-    # Import module and get main function
-    module = import_module(function_module)
-    main_function = getattr(module, function_name)
-
-    # Import init function if specified
-    init_function: Callable | None = None
-    init_handler: str | None = source_spec.get("init_function")
-    if init_handler is not None:
-        init_function = getattr(module, init_handler)
-
-    return main_function, init_function
 
 
 def execute_user_init(
