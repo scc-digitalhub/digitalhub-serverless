@@ -19,11 +19,18 @@ const (
 	DefaultProcessingFactor = 1 // Process every frame by default
 )
 
+// SinkConfiguration holds the sink configuration for the trigger
+type SinkConfiguration struct {
+	Kind       string                 `mapstructure:"kind"`
+	Attributes map[string]interface{} `mapstructure:"attributes"`
+}
+
 // Configuration holds the MJPEG trigger configuration
 type Configuration struct {
 	trigger.Configuration
-	URL              string `mapstructure:"url"`
-	ProcessingFactor int    `mapstructure:"processing_factor"`
+	URL              string             `mapstructure:"url"`
+	ProcessingFactor int                `mapstructure:"processing_factor"`
+	Sink             *SinkConfiguration `mapstructure:"sink"`
 }
 
 // NewConfiguration creates a new MJPEG trigger configuration

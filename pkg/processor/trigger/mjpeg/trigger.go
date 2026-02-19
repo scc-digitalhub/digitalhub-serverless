@@ -18,10 +18,12 @@ import (
 
 	"github.com/nuclio/errors"
 	"github.com/nuclio/logger"
+	"github.com/nuclio/nuclio-sdk-go"
 	"github.com/nuclio/nuclio/pkg/common"
 	"github.com/nuclio/nuclio/pkg/functionconfig"
 	"github.com/nuclio/nuclio/pkg/processor/trigger"
 	"github.com/nuclio/nuclio/pkg/processor/worker"
+	"github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/sink"
 )
 
 type mjpeg struct {
@@ -32,6 +34,7 @@ type mjpeg struct {
 	cancel     context.CancelFunc
 	wg         sync.WaitGroup
 	frameCount int64
+	sink       sink.Sink
 }
 
 func newTrigger(logger logger.Logger,
@@ -61,11 +64,33 @@ func newTrigger(logger logger.Logger,
 	}
 	newTrigger.AbstractTrigger.Trigger = &newTrigger
 
+	// Initialize sink if configured
+	if configuration.Sink != nil && configuration.Sink.Kind != "" {
+		sinkInstance, err := sink.RegistrySingleton.Create(
+			logger,
+			configuration.Sink.Kind,
+			configuration.Sink.Attributes,
+		)
+		if err != nil {
+			return nil, errors.Wrap(err, "Failed to create sink")
+		}
+		newTrigger.sink = sinkInstance
+		logger.InfoWith("Sink configured for MJPEG trigger", "kind", configuration.Sink.Kind)
+	}
+
 	return &newTrigger, nil
 }
 
 func (m *mjpeg) Start(checkpoint functionconfig.Checkpoint) error {
 	m.Logger.DebugWith("Starting MJPEG trigger", "url", m.configuration.URL)
+
+	// Start sink if configured
+	if m.sink != nil {
+		if err := m.sink.Start(); err != nil {
+			return errors.Wrap(err, "Failed to start sink")
+		}
+		m.Logger.InfoWith("Sink started", "kind", m.sink.GetKind())
+	}
 
 	m.wg.Add(1)
 	go m.streamFrames()
@@ -265,10 +290,6 @@ func (m *mjpeg) processFrame(frameData []byte) {
 		url:       m.configuration.URL,
 	}
 
-	m.Logger.DebugWith("Processing frame",
-		"frame", m.frameCount,
-		"size", len(frameData))
-
 	// Allocate worker and submit event
 	response, submitError, processError := m.AllocateWorkerAndSubmitEvent(
 		event,
@@ -285,9 +306,26 @@ func (m *mjpeg) processFrame(frameData []byte) {
 		return
 	}
 
-	m.Logger.DebugWith("Frame processed successfully",
-		"frame", m.frameCount,
-		"response", response)
+	// Write response to sink if configured
+	if m.sink != nil {
+		var responseData []byte
+		if resp, ok := response.(nuclio.Response); ok {
+			responseData = resp.Body
+		} else {
+			m.Logger.Debug("Response is not nuclio.Response, skipping sink write")
+			return
+		}
+
+		metadata := map[string]interface{}{
+			"frame_number": m.frameCount,
+			"timestamp":    event.timestamp,
+			"url":          m.configuration.URL,
+		}
+
+		if err := m.sink.Write(context.Background(), responseData, metadata); err != nil {
+			m.Logger.WarnWith("Failed to write to sink", "error", err)
+		}
+	}
 }
 
 func (m *mjpeg) Stop(force bool) (functionconfig.Checkpoint, error) {
@@ -307,6 +345,13 @@ func (m *mjpeg) Stop(force bool) (functionconfig.Checkpoint, error) {
 		m.Logger.Info("MJPEG trigger stopped successfully")
 	case <-time.After(10 * time.Second):
 		m.Logger.Warn("Timeout waiting for MJPEG trigger to stop")
+	}
+
+	// Stop sink if configured
+	if m.sink != nil {
+		if err := m.sink.Stop(force); err != nil {
+			m.Logger.WarnWith("Failed to stop sink", "error", err)
+		}
 	}
 
 	return nil, nil

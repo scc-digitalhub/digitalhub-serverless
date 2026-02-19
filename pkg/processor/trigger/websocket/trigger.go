@@ -21,6 +21,7 @@ import (
 	"github.com/nuclio/nuclio/pkg/functionconfig"
 	"github.com/nuclio/nuclio/pkg/processor/trigger"
 	"github.com/nuclio/nuclio/pkg/processor/worker"
+	"github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/sink"
 )
 
 // websocket_trigger implements a Nuclio trigger that accepts WebSocket connections
@@ -42,6 +43,7 @@ type websocket_trigger struct {
 
 	stop chan struct{}
 	wg   sync.WaitGroup
+	sink sink.Sink
 }
 
 func newTrigger(
@@ -79,6 +81,20 @@ func newTrigger(
 		"isStream", configuration.IsStream,
 	)
 
+	// Initialize sink if configured
+	if configuration.Sink != nil && configuration.Sink.Kind != "" {
+		sinkInstance, err := sink.RegistrySingleton.Create(
+			logger,
+			configuration.Sink.Kind,
+			configuration.Sink.Attributes,
+		)
+		if err != nil {
+			return nil, errors.Wrap(err, "Failed to create sink")
+		}
+		ws_t.sink = sinkInstance
+		logger.InfoWith("Sink configured for WebSocket trigger", "kind", configuration.Sink.Kind)
+	}
+
 	return ws_t, nil
 }
 
@@ -86,6 +102,14 @@ func newTrigger(
 func (ws_t *websocket_trigger) Start(_ functionconfig.Checkpoint) error {
 
 	ws_t.Logger.Info("WebSocket trigger starting")
+
+	// Start sink if configured
+	if ws_t.sink != nil {
+		if err := ws_t.sink.Start(); err != nil {
+			return errors.Wrap(err, "Failed to start sink")
+		}
+		ws_t.Logger.InfoWith("Sink started", "kind", ws_t.sink.GetKind())
+	}
 
 	if ws_t.configuration.IsStream {
 		ws_t.streamProcessor = NewDataProcessorStream(
@@ -248,6 +272,17 @@ func (ws_t *websocket_trigger) process(ev *Event) {
 			_ = ws_t.wsConn.WriteMessage(websocket.TextMessage, r.Body)
 		}
 		ws_t.wsLock.Unlock()
+
+		// Write response to sink if configured
+		if ws_t.sink != nil {
+			metadata := map[string]interface{}{
+				"timestamp": time.Now(),
+			}
+
+			if err := ws_t.sink.Write(context.Background(), r.Body, metadata); err != nil {
+				ws_t.Logger.WarnWith("Failed to write to sink", "err", err)
+			}
+		}
 	}
 }
 
@@ -276,6 +311,13 @@ func (ws_t *websocket_trigger) Stop(bool) (functionconfig.Checkpoint, error) {
 		// All goroutines finished
 	case <-time.After(5 * time.Second):
 		ws_t.Logger.Warn("Timeout waiting for goroutines to stop")
+	}
+
+	// Stop sink if configured
+	if ws_t.sink != nil {
+		if err := ws_t.sink.Stop(false); err != nil {
+			ws_t.Logger.WarnWith("Failed to stop sink", "error", err)
+		}
 	}
 
 	return nil, nil

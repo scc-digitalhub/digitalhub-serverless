@@ -72,6 +72,12 @@ import (
 
 	// load all sinks
 	_ "github.com/nuclio/nuclio/pkg/sinks"
+
+	// load all stream sinks
+	_ "github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/sink/mjpeg"
+	_ "github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/sink/rtsp"
+	_ "github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/sink/webhook"
+	_ "github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/sink/websocket"
 )
 
 // Processor is responsible to process events

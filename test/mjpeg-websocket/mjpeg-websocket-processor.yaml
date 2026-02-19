@@ -1,7 +1,7 @@
 apiVersion: "nuclio.io/v1"
 kind: NuclioFunction
 metadata:
-  name: my-function
+  name: mjpeg-to-websocket
   namespace: nuclio
 spec:
   runtime: python
@@ -11,11 +11,11 @@ spec:
       kind: mjpeg
       attributes:
         url: "http://77.222.181.11:8080/mjpg/video.mjpg"
-        processing_factor: 1
+        processing_factor: 2
         sink:
-          kind: mjpeg
+          kind: websocket
           attributes:
-            port: 8081
-            path: "/processed"
+            url: "ws://localhost:9090/frames"
+            messageType: "binary"
+            timeout: 10
       maxWorkers: 4
-  

@@ -10,8 +10,8 @@ def handler_serve(context: nuclio_sdk.Context, event: nuclio_sdk.Event):
     frame_data = event.body
     
     # Get frame metadata
-    frame_num = event.get_field("frame_num")
-    url = event.get_field("url")
+    frame_num = event.fields.get("frame_num")
+    url = event.url
     
     context.logger.info(f"Processing frame {frame_num} from {url}")
     context.logger.info(f"Frame size: {len(frame_data)} bytes")
@@ -20,6 +20,6 @@ def handler_serve(context: nuclio_sdk.Context, event: nuclio_sdk.Event):
     # ...
     
     return context.Response(
-        body=f"Processed frame {frame_num}",
+        body=frame_data,
         status_code=200
     )

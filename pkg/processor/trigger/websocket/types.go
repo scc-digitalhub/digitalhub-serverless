@@ -20,15 +20,22 @@ const (
 	DefaultIsStream           = false
 )
 
+// SinkConfiguration holds the sink configuration for the trigger
+type SinkConfiguration struct {
+	Kind       string                 `mapstructure:"kind"`
+	Attributes map[string]interface{} `mapstructure:"attributes"`
+}
+
 type Configuration struct {
 	trigger.Configuration
-	WebSocketAddr      string        `mapstructure:"websocket_addr"`
-	BufferSize         int           `mapstructure:"buffer_size"`
-	ChunkBytes         int           `mapstructure:"chunk_bytes"`
-	MaxBytes           int           `mapstructure:"max_bytes"`
-	TrimBytes          int           `mapstructure:"trim_bytes"`
-	ProcessingInterval time.Duration `mapstructure:"processing_interval"`
-	IsStream           bool          `mapstructure:"is_stream"`
+	WebSocketAddr      string             `mapstructure:"websocket_addr"`
+	BufferSize         int                `mapstructure:"buffer_size"`
+	ChunkBytes         int                `mapstructure:"chunk_bytes"`
+	MaxBytes           int                `mapstructure:"max_bytes"`
+	TrimBytes          int                `mapstructure:"trim_bytes"`
+	ProcessingInterval time.Duration      `mapstructure:"processing_interval"`
+	IsStream           bool               `mapstructure:"is_stream"`
+	Sink               *SinkConfiguration `mapstructure:"sink"`
 }
 
 func NewConfiguration(id string,
