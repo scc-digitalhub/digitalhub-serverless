@@ -15,6 +15,7 @@ import (
 	"github.com/bluenviron/gortsplib/v4/pkg/base"
 	"github.com/bluenviron/gortsplib/v4/pkg/description"
 	"github.com/bluenviron/gortsplib/v4/pkg/format"
+	"github.com/bluenviron/gortsplib/v4/pkg/format/rtplpcm"
 	"github.com/bluenviron/gortsplib/v4/pkg/format/rtpmjpeg"
 	"github.com/mitchellh/mapstructure"
 	"github.com/nuclio/logger"
@@ -39,6 +40,7 @@ type Sink struct {
 	mjpegFormat   *format.MJPEG
 	mjpegEncoder  *rtpmjpeg.Encoder
 	lpcmFormat    *format.LPCM
+	lpcmEncoder   *rtplpcm.Encoder
 	mutex         sync.RWMutex
 	stopChan      chan struct{}
 	wg            sync.WaitGroup
@@ -116,6 +118,13 @@ func (s *Sink) Start() error {
 				Type:    description.MediaTypeAudio,
 				Formats: []format.Format{s.lpcmFormat},
 			}},
+		}
+
+		// Create LPCM encoder
+		var err error
+		s.lpcmEncoder, err = s.lpcmFormat.CreateEncoder()
+		if err != nil {
+			return fmt.Errorf("failed to create LPCM encoder: %w", err)
 		}
 	}
 
@@ -263,14 +272,27 @@ func (s *Sink) writeVideoFrame(jpegData []byte) error {
 
 // writeAudioFrame writes a PCM audio frame to the stream
 func (s *Sink) writeAudioFrame(pcmData []byte) error {
-	if s.stream == nil || s.lpcmFormat == nil {
+	if s.stream == nil || s.lpcmEncoder == nil {
 		return fmt.Errorf("stream not initialized")
 	}
 
-	// For LPCM, we can send raw PCM data directly
-	// The format handles the RTP encapsulation
-	// TODO: Implement proper LPCM encoder when needed
-	return fmt.Errorf("LPCM audio streaming not yet implemented")
+	// Encode PCM to RTP packets
+	packets, err := s.lpcmEncoder.Encode(pcmData)
+	if err != nil {
+		return fmt.Errorf("failed to encode LPCM: %w", err)
+	}
+
+	// Write all RTP packets to the stream
+	media := s.stream.Desc.Medias[0]
+	for _, pkt := range packets {
+		s.logger.DebugWith("Writing audio RTP packet", "size", len(pkt.Payload))
+		err := s.stream.WritePacketRTP(media, pkt)
+		if err != nil {
+			return fmt.Errorf("failed to write RTP packet: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // GetKind returns the sink type
