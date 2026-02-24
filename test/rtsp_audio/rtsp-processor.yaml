@@ -11,6 +11,7 @@ spec:
       kind: rtsp
       attributes:
         rtsp_url: rtsp://localhost:8554/mystream
+        is_video: false
         output:
           kind: webhook
           config:

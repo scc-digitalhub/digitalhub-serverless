@@ -23,7 +23,7 @@ import (
 	"github.com/pion/rtp"
 )
 
-// rtspTrigger streams audio from a RTSP server and sends continuous PCM to Nuclio workers.
+// rtspTrigger streams audio or video from a RTSP server and sends PCM audio chunks or JPEG frames to Nuclio workers.
 type rtspTrigger struct {
 	trigger.AbstractTrigger
 	configuration *Configuration
@@ -66,7 +66,7 @@ func newTrigger(logger logger.Logger,
 	return t, nil
 }
 
-// Start establishes RTSP connection and starts processing LPCM audio
+// Start establishes RTSP connection and starts processing LPCM audio or video frames
 func (t *rtspTrigger) Start(checkpoint functionconfig.Checkpoint) error {
 	t.Logger.InfoWith("Starting RTSP trigger", "url", t.configuration.RTSPURL)
 
@@ -87,6 +87,7 @@ func (t *rtspTrigger) Start(checkpoint functionconfig.Checkpoint) error {
 		t.configuration.ChunkBytes,
 		t.configuration.MaxBytes,
 		t.configuration.TrimBytes,
+		t.configuration.IsVideo,
 	)
 	t.dataProcessor.Start(time.Millisecond * time.Duration(t.configuration.ProcessingInterval))
 
@@ -125,7 +126,7 @@ func (t *rtspTrigger) Start(checkpoint functionconfig.Checkpoint) error {
 	t.client.OnPacketRTPAny(func(media *description.Media, forma format.Format, pkt *rtp.Packet) {
 		payload, err := t.pipeline.ProcessRTP(pkt, forma)
 		if err != nil {
-			t.Logger.WarnWith("RTP processing error", "err", err)
+			// t.Logger.WarnWith("RTP processing error", "err", err)
 			return
 		}
 		if payload != nil {

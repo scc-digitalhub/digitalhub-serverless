@@ -16,19 +16,20 @@ const (
 	DefaultMaxBytes           = 1440000
 	DefaultTrimBytes          = 1120000
 	DefaultProcessingInterval = 2000
+	DefaultIsVideo            = false
 )
 
 type Configuration struct {
 	trigger.Configuration
 
-	RTSPURL            string        `mapstructure:"rtsp_url"`
-	BufferSize         int           `mapstructure:"buffer_size"`
-	ChunkBytes         int           `mapstructure:"chunk_bytes"`
-	MaxBytes           int           `mapstructure:"max_bytes"`
-	TrimBytes          int           `mapstructure:"trim_bytes"`
-	ProcessingInterval time.Duration `mapstructure:"processing_interval"`
-
-	Output map[string]any `mapstructure:"output"`
+	RTSPURL            string         `mapstructure:"rtsp_url"`
+	BufferSize         int            `mapstructure:"buffer_size"`
+	ChunkBytes         int            `mapstructure:"chunk_bytes"`
+	MaxBytes           int            `mapstructure:"max_bytes"`
+	TrimBytes          int            `mapstructure:"trim_bytes"`
+	ProcessingInterval time.Duration  `mapstructure:"processing_interval"`
+	IsVideo            bool           `mapstructure:"is_video"`
+	Output             map[string]any `mapstructure:"output"`
 }
 
 func NewConfiguration(id string,
@@ -43,6 +44,7 @@ func NewConfiguration(id string,
 		MaxBytes:           DefaultMaxBytes,
 		TrimBytes:          DefaultTrimBytes,
 		ProcessingInterval: DefaultProcessingInterval,
+		IsVideo:            DefaultIsVideo,
 	}
 
 	// Base trigger config

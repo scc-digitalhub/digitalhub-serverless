@@ -7,7 +7,10 @@ package rtsp
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/binary"
+	"image"
+	"image/jpeg"
+	"mime/multipart"
 	"net/http"
 	"sync"
 	"time"
@@ -17,7 +20,12 @@ import (
 	"github.com/pion/rtp"
 )
 
-// DataProcessorStream buffers PCM data and emits fixed-size chunks
+//
+// ============================================================
+// DATA PROCESSOR
+// ============================================================
+//
+
 type DataProcessorStream struct {
 	lock       sync.Mutex
 	chunkBytes int
@@ -26,30 +34,26 @@ type DataProcessorStream struct {
 	chunkBuf   []byte
 	buffer     []byte
 	newBytes   int
+	isVideo    bool
 	output     chan *Event
 	stop       chan struct{}
 }
 
-type MediaPipeline struct {
-	depacketizers map[uint8]any
-}
-
-func NewDataProcessorStream(
-	chunkBytes, maxBytes, trimBytes int,
-) *DataProcessorStream {
+func NewDataProcessorStream(chunkBytes, maxBytes, trimBytes int, isVideo bool) *DataProcessorStream {
 	return &DataProcessorStream{
 		chunkBytes: chunkBytes,
 		maxBytes:   maxBytes,
 		trimBytes:  trimBytes,
 		chunkBuf:   []byte{},
 		buffer:     []byte{},
+		isVideo:    isVideo,
 		output:     make(chan *Event, 8),
 		stop:       make(chan struct{}),
 	}
 }
 
-func (dp *DataProcessorStream) Start(processingInterval time.Duration) {
-	go dp.loop(processingInterval)
+func (dp *DataProcessorStream) Start(interval time.Duration) {
+	go dp.loop(interval)
 }
 
 func (dp *DataProcessorStream) Stop() {
@@ -60,29 +64,41 @@ func (dp *DataProcessorStream) Push(data []byte) {
 	dp.lock.Lock()
 	defer dp.lock.Unlock()
 
+	// video mode = replace frame
+	if dp.isVideo {
+		dp.buffer = make([]byte, len(data))
+		copy(dp.buffer, data)
+		dp.newBytes = len(data)
+		return
+	}
+
+	// audio mode = chunk accumulate
 	dp.chunkBuf = append(dp.chunkBuf, data...)
 
 	for len(dp.chunkBuf) >= dp.chunkBytes {
 		chunk := make([]byte, dp.chunkBytes)
 		copy(chunk, dp.chunkBuf[:dp.chunkBytes])
 		dp.chunkBuf = dp.chunkBuf[dp.chunkBytes:]
+
 		dp.buffer = append(dp.buffer, chunk...)
+
 		if len(dp.buffer) > dp.maxBytes {
 			dp.buffer = dp.buffer[dp.trimBytes:]
 		}
+
 		dp.newBytes += len(chunk)
 	}
 }
 
-func (dp *DataProcessorStream) loop(processingInterval time.Duration) {
-	ticker := time.NewTicker(processingInterval)
-	defer ticker.Stop()
+func (dp *DataProcessorStream) loop(interval time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
 
 	for {
 		select {
 		case <-dp.stop:
 			return
-		case <-ticker.C:
+		case <-t.C:
 			if ev := dp.tryEmit(); ev != nil {
 				dp.output <- ev
 			}
@@ -94,8 +110,14 @@ func (dp *DataProcessorStream) tryEmit() *Event {
 	dp.lock.Lock()
 	defer dp.lock.Unlock()
 
-	if dp.newBytes < dp.chunkBytes {
-		return nil
+	if dp.isVideo {
+		if dp.newBytes == 0 {
+			return nil
+		}
+	} else {
+		if dp.newBytes < dp.chunkBytes {
+			return nil
+		}
 	}
 
 	snapshot := make([]byte, len(dp.buffer))
@@ -112,86 +134,259 @@ func (dp *DataProcessorStream) Output() <-chan *Event {
 	return dp.output
 }
 
-// MediaPipeline handles LPCM depacketizers
+type MediaPipeline struct {
+	trigger *rtspTrigger
+
+	depacketizers map[uint8]any
+
+	h264Decoders map[uint8]*OpenH264Decoder
+	h264FirstIDR map[uint8]bool
+}
+
 func NewMediaPipeline(t *rtspTrigger, medias []*description.Media) (*MediaPipeline, error) {
+
 	mp := &MediaPipeline{
+		trigger:       t,
 		depacketizers: make(map[uint8]any),
+		h264Decoders:  make(map[uint8]*OpenH264Decoder),
+		h264FirstIDR:  make(map[uint8]bool),
 	}
 
 	for _, media := range medias {
 		for _, forma := range media.Formats {
+
 			switch f := forma.(type) {
+
+			// audio
 			case *format.LPCM:
+				dec, err := f.CreateDecoder()
+				if err == nil {
+					mp.depacketizers[forma.PayloadType()] = dec
+				}
+
+			// video
+			case *format.H264:
 				dep, err := f.CreateDecoder()
 				if err != nil {
-					t.Logger.WarnWith("Failed to create LPCM decoder", "err", err)
 					continue
 				}
 				mp.depacketizers[forma.PayloadType()] = dep
+
+				op, err := NewOpenH264Decoder()
+				if err != nil {
+					return nil, err
+				}
+				mp.h264Decoders[forma.PayloadType()] = op
+
+				// feed SPS/PPS to decoder
+				initNALUs := [][]byte{}
+				if len(f.SPS) > 0 {
+					initNALUs = append(initNALUs, f.SPS)
+				}
+				if len(f.PPS) > 0 {
+					initNALUs = append(initNALUs, f.PPS)
+				}
+				if len(initNALUs) > 0 {
+					op.Decode(initNALUs)
+				}
+
+				// t.dataProcessor.isVideo = true
+				t.Logger.Info("Video stream detected (H264)")
+
+			// ---------- H265 passthrough ----------
+			case *format.H265:
+				dep, err := f.CreateDecoder()
+				if err == nil {
+					mp.depacketizers[forma.PayloadType()] = dep
+				}
+				// t.dataProcessor.isVideo = true
 			}
 		}
 	}
+
 	return mp, nil
 }
 
-// ProcessRTP decodes RTP packets using the depacketizer
 func (mp *MediaPipeline) ProcessRTP(pkt *rtp.Packet, forma format.Format) ([]byte, error) {
+
 	dep, ok := mp.depacketizers[forma.PayloadType()]
 	if !ok {
-		// fallback: push payload directly
 		return pkt.Payload, nil
 	}
 
+	if dec, ok := mp.h264Decoders[forma.PayloadType()]; ok {
+
+		type h264Dep interface {
+			Decode(*rtp.Packet) ([][]byte, error)
+		}
+
+		if hdec, ok := dep.(h264Dep); ok {
+
+			au, err := hdec.Decode(pkt)
+			if err != nil || au == nil {
+				return nil, err
+			}
+
+			pt := forma.PayloadType()
+
+			// WAIT FIRST IDR
+			if !mp.h264FirstIDR[pt] {
+				if !containsIDR(au) {
+					return nil, nil
+				}
+				mp.h264FirstIDR[pt] = true
+			}
+
+			yuv, w, h, err := dec.Decode(au)
+			if err != nil || yuv == nil {
+				return nil, err
+			}
+
+			return EncodeFrameToJPEG(yuv, w, h, 80)
+		}
+	}
+
+	// ===============================
+	// GENERIC / AUDIO
+	// ===============================
 	switch d := dep.(type) {
+
 	case interface {
 		Decode(*rtp.Packet) ([]byte, error)
 	}:
 		payload, err := d.Decode(pkt)
-		if err != nil {
+		if err != nil || len(payload) == 0 {
 			return nil, err
 		}
-		if len(payload) == 0 {
-			return nil, nil
-		}
+
+		// convert big endian PCM to little endian (common format for audio processing)
+		// go2rtp always streams in big endian
 		payload = convertBigEndianToLittleEndian(payload)
 		return payload, nil
-	default:
-		return pkt.Payload, nil
 	}
+
+	return pkt.Payload, nil
 }
 
-func convertBigEndianToLittleEndian(data []byte) []byte {
-	converted := make([]byte, len(data))
-	for i := 0; i < len(data)-1; i += 2 {
-		// Swap bytes: [MSB, LSB] -> [LSB, MSB]
-		converted[i] = data[i+1]
-		converted[i+1] = data[i]
+func containsIDR(nalus [][]byte) bool {
+	for _, n := range nalus {
+		if len(n) == 0 {
+			continue
+		}
+		if (n[0] & 0x1F) == 5 {
+			return true
+		}
 	}
-	// Handle odd byte count (shouldn't happen with 16-bit audio)
-	if len(data)%2 != 0 {
-		converted[len(data)-1] = data[len(data)-1]
-	}
-	return converted
+	return false
 }
 
-// postToWebhook forwards processed event to the configured webhook
+// JPEG encoding helper (for video frames)
+func EncodeFrameToJPEG(yuv []byte, width, height int, quality int) ([]byte, error) {
+
+	img := image.NewYCbCr(
+		image.Rect(0, 0, width, height),
+		image.YCbCrSubsampleRatio420,
+	)
+
+	ySize := width * height
+	uvSize := ySize / 4
+
+	copy(img.Y, yuv[:ySize])
+	copy(img.Cb, yuv[ySize:ySize+uvSize])
+	copy(img.Cr, yuv[ySize+uvSize:])
+
+	var buf bytes.Buffer
+	err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: quality})
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// ============================================================
+// WEBHOOK
+// ============================================================
 func (t *rtspTrigger) postToWebhook(body []byte) {
-	payload := map[string]any{
-		"handler_output": string(body),
+	if t.webhookURL == "" {
+		return
 	}
-	jsonPayload, _ := json.Marshal(payload)
 
-	req, err := http.NewRequest("POST", t.webhookURL, bytes.NewBuffer(jsonPayload))
+	// Send webhook with multipart/form-data
+	// body contains the handler response; typically text or binary data
+	t.postToWebhookWithData("", body)
+}
+
+// postToWebhookWithData sends data to webhook using multipart/form-data
+// text and data fields are optional (can be empty/nil)
+func (t *rtspTrigger) postToWebhookWithData(text string, data []byte) {
+	if t.webhookURL == "" {
+		return
+	}
+
+	// Create multipart form
+	buf := &bytes.Buffer{}
+	writer := multipart.NewWriter(buf)
+
+	// Add text field if provided
+	if text != "" {
+		fw, err := writer.CreateFormField("text")
+		if err != nil {
+			t.Logger.WarnWith("Failed to create text form field", "err", err)
+			return
+		}
+		if _, err := fw.Write([]byte(text)); err != nil {
+			t.Logger.WarnWith("Failed to write text field", "err", err)
+			return
+		}
+	}
+
+	// Add data field if provided
+	if len(data) > 0 {
+		fw, err := writer.CreateFormFile("data", "frame.bin")
+		if err != nil {
+			t.Logger.WarnWith("Failed to create data form file", "err", err)
+			return
+		}
+		if _, err := fw.Write(data); err != nil {
+			t.Logger.WarnWith("Failed to write data file", "err", err)
+			return
+		}
+	}
+
+	if err := writer.Close(); err != nil {
+		t.Logger.WarnWith("Failed to close multipart writer", "err", err)
+		return
+	}
+
+	// Create and send request
+	req, err := http.NewRequest("POST", t.webhookURL, buf)
 	if err != nil {
 		t.Logger.WarnWith("Failed to create webhook request", "err", err)
 		return
 	}
-	req.Header.Set("Content-Type", "application/json")
+
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Logger.WarnWith("Failed to POST webhook request", "err", err)
+		t.Logger.WarnWith("Webhook POST failed", "err", err)
 		return
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		t.Logger.WarnWith("Webhook returned non-success status", "status", resp.StatusCode)
+		return
+	}
+
+	t.Logger.DebugWith("Webhook POST succeeded", "status", resp.StatusCode, "text_len", len(text), "data_len", len(data))
+}
+
+func convertBigEndianToLittleEndian(in []byte) []byte {
+	out := make([]byte, len(in))
+	for i := 0; i+1 < len(in); i += 2 {
+		v := binary.BigEndian.Uint16(in[i:])
+		binary.LittleEndian.PutUint16(out[i:], v)
+	}
+	return out
 }
