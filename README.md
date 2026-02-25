@@ -79,6 +79,340 @@ Once you have the docker container and the application running, you can test it 
 curl localhost:8080/resource -X POST -H 'Content-type: text/plain' -d 'hello' -s -vvv
 ```
 
+## OpenInference Trigger Configuration
+
+Trigger of type ``openinference`` extends the family of available triggers with the functionality to serve machine learning models using the [OpenInference protocol](https://github.com/openmodelio/openinference). This trigger provides standardized REST and gRPC endpoints compatible with inference serving frameworks like NVIDIA Triton, KServe, and other OpenInference-compliant systems.
+
+The trigger exposes the following endpoints:
+
+### REST Endpoints (HTTP/JSON)
+
+- `GET /v2/health/live` - Server liveness check
+- `GET /v2/health/ready` - Server readiness check
+- `GET /v2/models/{model_name}/versions/{version}/ready` - Model readiness check
+- `GET /v2/models/{model_name}/versions/{version}` - Model metadata (inputs/outputs schema)
+- `POST /v2/models/{model_name}/versions/{version}/infer` - Perform inference
+
+### gRPC Endpoints
+
+The trigger implements the `GRPCInferenceService` from the OpenInference protocol specification:
+
+- `ServerLive` - Server liveness check
+- `ServerReady` - Server readiness check  
+- `ModelReady` - Model readiness check
+- `ServerMetadata` - Server metadata
+- `ModelMetadata` - Model metadata with tensor definitions
+- `ModelInfer` - Perform inference
+
+### Configuration
+
+The trigger configuration is defined as follows:
+
+```yaml
+triggers:
+  myopeninferencetrigger:
+    kind: openinference
+    attributes:
+      model_name: my-model              # Model name (default: "model")
+      model_version: "1.0"               # Model version (default: "1")
+      rest_port: 8080                    # REST API port (default: 8080)
+      grpc_port: 9000                    # gRPC port (default: 9000)
+      enable_rest: true                  # Enable REST endpoints (default: true)
+      enable_grpc: true                  # Enable gRPC endpoints (default: true)
+      input_tensors:                     # Input tensor definitions
+        - name: input
+          datatype: FP32
+          shape: [1, 3, 224, 224]
+      output_tensors:                    # Output tensor definitions
+        - name: output
+          datatype: FP32
+          shape: [1, 1000]
+    maxWorkers: 4
+```
+
+**Configuration Parameters:**
+
+- `model_name` - Name of the model being served (required)
+- `model_version` - Version identifier for the model (default: "1")
+- `rest_port` - TCP port for REST API endpoints (default: 8080)
+- `grpc_port` - TCP port for gRPC service (default: 9000)
+- `enable_rest` - Enable REST API endpoints (default: true)
+- `enable_grpc` - Enable gRPC service (default: true)
+- `input_tensors` - Array of input tensor definitions with name, datatype, and shape
+- `output_tensors` - Array of output tensor definitions with name, datatype, and shape
+
+**Supported Data Types:**
+
+`BOOL`, `UINT8`, `UINT16`, `UINT32`, `UINT64`, `INT8`, `INT16`, `INT32`, `INT64`, `FP16`, `FP32`, `FP64`, `BYTES`
+
+**Handler Function:**
+
+The handler function receives an event with the inference request and should return a response in the OpenInference format:
+
+```python
+def handler(context, event):
+    # Parse input tensors from event.body
+    request = json.loads(event.body)
+    inputs = request["inputs"]
+    
+    # Perform inference
+    # ... your model inference code ...
+    
+    # Return output tensors
+    return context.Response(
+        body=json.dumps({
+            "model_name": request["model_name"],
+            "model_version": request["model_version"],
+            "outputs": [
+                {
+                    "name": "output",
+                    "datatype": "FP32",
+                    "shape": [1, 1000],
+                    "data": output_data
+                }
+            ]
+        }),
+        headers={},
+        content_type="application/json",
+        status_code=200
+    )
+```
+
+### Testing
+
+To test the OpenInference trigger functionality, use the test suite in the [test/openinference/](test/openinference/) directory. The test suite includes:
+
+- Python inference handler example
+- REST API test client with comprehensive test scenarios
+- gRPC client test examples
+- Sample configuration
+
+To run the test:
+
+```bash
+# Start the processor with the OpenInference trigger
+./test/openinference/run.sh
+
+# In another terminal, run the REST API tests
+cd test/openinference
+python3 test_rest_client.py
+
+# Or run the gRPC tests
+python3 test_grpc_client.py
+```
+
+Example REST API test:
+
+```bash
+# Check server liveness
+curl http://localhost:8080/v2/health/live
+
+# Get model metadata
+curl http://localhost:8080/v2/models/test-model/versions/1.0
+
+# Perform inference
+curl -X POST http://localhost:8080/v2/models/test-model/versions/1.0/infer \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inputs": [{
+      "name": "input",
+      "datatype": "FP32",
+      "shape": [1, 3],
+      "data": [1.0, 2.0, 3.0]
+    }]
+  }'
+```
+
+## MJPEG Trigger Configuration
+
+Trigger of type ``mjpeg`` enables processing of frames from Motion JPEG (MJPEG) video streams in real-time. MJPEG is a video compression format where each frame is individually compressed as a JPEG image and is commonly used in IP cameras, webcams, and video surveillance systems.
+
+The MJPEG trigger connects to an MJPEG stream URL, extracts individual frames, and passes them to your function handler for processing. This enables use cases such as:
+
+- **Video Analytics**: Real-time object detection, face recognition, motion detection
+- **Surveillance**: Monitor camera feeds for security events
+- **Quality Control**: Inspect manufacturing processes via camera feeds
+- **Traffic Monitoring**: Analyze traffic patterns from road cameras
+- **Retail Analytics**: Count customers, analyze behavior patterns
+
+### Configuration
+
+The trigger configuration is defined as follows:
+
+```yaml
+triggers:
+  mjpeg_stream:
+    kind: mjpeg
+    attributes:
+      url: "http://camera.example.com:8080/stream.mjpg"  # MJPEG stream URL (required)
+      processing_factor: 1                                # Frame sampling (default: 1)
+      sink:                                               # Optional sink configuration
+        kind: rtsp                                        # Sink type (rtsp, websocket, webhook, mjpeg)
+        attributes:
+          port: 8554
+          path: "/stream"
+    maxWorkers: 4
+```
+
+**Configuration Parameters:**
+
+- `url` - URL of the MJPEG stream to connect to (required)
+  - Example: `http://192.168.1.100:8080/video.mjpg`
+- `processing_factor` - Controls frame sampling to reduce processing load (default: 1)
+  - Value `1`: process every frame
+  - Value `2`: process every 2nd frame (50% frame drop)
+  - Value `5`: process every 5th frame (80% frame drop)
+  - Must be >= 1
+- `sink` - Optional sink configuration for output streaming (see Sink documentation)
+
+### Event Structure
+
+When a frame is processed, the handler receives an event with:
+
+- **Body**: Raw JPEG image data (bytes)
+- **Content-Type**: `image/jpeg`
+- **Fields**:
+  - `frame_num`: Sequential frame number (int64)
+  - `url`: The source MJPEG stream URL
+  - `timestamp`: Frame capture timestamp
+
+### Handler Function
+
+Example Python handler for processing MJPEG frames:
+
+```python
+def handler(context, event):
+    # Get the JPEG frame data
+    frame_data = event.body
+    
+    # Get frame metadata
+    frame_num = event.get_field("frame_num")
+    url = event.get_field("url")
+    
+    context.logger.info(f"Processing frame {frame_num} from {url}")
+    context.logger.info(f"Frame size: {len(frame_data)} bytes")
+    
+    # Process the frame (e.g., save, analyze with CV library)
+    # ...
+    
+    return context.Response(
+        body=frame_data,  # Return processed frame
+        content_type="image/jpeg",
+        status_code=200
+    )
+```
+
+Example handler with image processing using OpenCV:
+
+```python
+import cv2
+import numpy as np
+
+def handler(context, event):
+    # Decode JPEG frame
+    nparr = np.frombuffer(event.body, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    
+    # Perform image processing (e.g., face detection)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+    
+    # Draw rectangles around faces
+    for (x, y, w, h) in faces:
+        cv2.rectangle(img, (x, y), (x+w, y+h), (255, 0, 0), 2)
+    
+    frame_num = event.get_field("frame_num")
+    context.logger.info(f"Detected {len(faces)} faces in frame {frame_num}")
+    
+    # Encode back to JPEG
+    _, encoded = cv2.imencode('.jpg', img)
+    
+    return context.Response(
+        body=encoded.tobytes(),
+        content_type="image/jpeg",
+        status_code=200
+    )
+```
+
+### Behavior
+
+**Stream Connection:**
+- The trigger automatically connects to the MJPEG stream on start
+- If the connection is lost, it automatically retries every 5 seconds
+- The trigger continues running until explicitly stopped
+
+**Frame Processing:**
+- Frames are extracted from the multipart MIME stream
+- Each frame is wrapped as a Nuclio event
+- The event is submitted to an available worker for processing
+- If `processing_factor > 1`, frames are dropped to reduce load
+
+**Error Handling:**
+- Connection errors trigger automatic reconnection
+- Frame parsing errors are logged but don't stop the stream
+- Worker allocation failures are logged (event is dropped)
+
+### Sink Integration
+
+The MJPEG trigger supports optional sink configuration for outputting processed frames. Available sinks include:
+
+- **RTSP**: Stream to RTSP clients (native Go implementation using gortsplib)
+- **WebSocket**: Stream to WebSocket clients
+- **Webhook**: Send frames to HTTP endpoints
+- **MJPEG**: Re-stream as MJPEG
+
+Example with RTSP sink:
+
+```yaml
+triggers:
+  mjpeg_camera:
+    kind: mjpeg
+    attributes:
+      url: "http://camera.local/stream.mjpg"
+      processing_factor: 1
+      sink:
+        kind: rtsp
+        attributes:
+          port: 8554
+          path: "/processed"
+          type: "video"
+    maxWorkers: 4
+```
+
+After starting the processor, clients can connect to the RTSP stream:
+
+```bash
+ffplay rtsp://localhost:8554/processed
+# or
+vlc rtsp://localhost:8554/processed
+```
+
+### Testing
+
+To test the MJPEG trigger functionality, use the test examples in the [test/](test/) directory:
+
+- `test/mjpeg/` - Basic MJPEG stream processing
+- `test/mjpeg-rtsp/` - MJPEG to RTSP streaming
+- `test/mjpeg-webhook/` - MJPEG with webhook sink
+- `test/mjpeg-websocket/` - MJPEG with WebSocket sink
+
+Example test run:
+
+```bash
+# Start the MJPEG processor
+./test/mjpeg-rtsp/run.sh
+
+# In another terminal, connect to the output stream
+ffplay rtsp://localhost:8554/processed
+```
+
+### Performance Considerations
+
+- **Frame Rate**: Use `processing_factor` to control CPU/memory usage
+- **Worker Pool**: Configure adequate workers to handle frame processing rate
+- **Network**: Ensure stable network connection to the MJPEG source
+- **Processing Time**: If processing takes longer than frame interval, increase `processing_factor`
+
 ## Development
 
 See CONTRIBUTING for contribution instructions.

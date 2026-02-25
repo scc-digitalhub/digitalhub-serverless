@@ -1,0 +1,33 @@
+apiVersion: "nuclio.io/v1"
+kind: NuclioFunction
+metadata:
+  name: openinference-test
+  namespace: nuclio
+spec:
+  runtime: python
+  handler: test_handler:handler
+  triggers:
+    openinference:
+      kind: openinference
+      attributes:
+        model_name: "test-model"
+        model_version: "1.0"
+        enable_rest: true
+        enable_grpc: true
+        rest_port: 8080
+        grpc_port: 9000
+        input_tensors:
+          - name: "input"
+            data_type: "FP32"
+            shape: [1, 224, 224, 3]
+          - name: "text_input"
+            data_type: "BYTES"
+            shape: [1]
+        output_tensors:
+          - name: "output_input"
+            data_type: "FP32"
+            shape: [1, 224, 224, 3]
+          - name: "output_text_input"
+            data_type: "BYTES"
+            shape: [1]
+      max_workers: 4
