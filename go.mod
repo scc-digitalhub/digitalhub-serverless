@@ -3,19 +3,19 @@ module github.com/scc-digitalhub/digitalhub-serverless
 go 1.25
 
 require (
+	github.com/bluenviron/gortsplib/v5 v5.2.2
 	github.com/envoyproxy/go-control-plane/envoy v1.35.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/nuclio/errors v0.0.4
-	github.com/bluenviron/gortsplib/v5 v5.2.2
 	github.com/nuclio/logger v0.0.1
 	github.com/nuclio/nuclio v1.14.2
 	github.com/nuclio/nuclio-sdk-go v0.5.3
 	github.com/nuclio/zap v0.3.1
+	github.com/pion/rtp v1.9.0
 	github.com/stretchr/testify v1.11.1
 	github.com/v3io/version-go v0.0.2
 	google.golang.org/grpc v1.78.0
-	github.com/pion/rtp v1.9.0
 )
 
 require (
