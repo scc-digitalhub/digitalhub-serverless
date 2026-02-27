@@ -1,0 +1,81 @@
+# SPDX-FileCopyrightText: © 2025 DSLab - Fondazione Bruno Kessler
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# ARGUMENTS
+ARG PYTHON_VERSION=3.13
+ARG GIT_TAG=latest
+ARG NUCLIO_LABEL=latest
+ARG NUCLIO_ARCH=amd64
+ARG NUCLIO_DOCKER_IMAGE_TAG=1.13.2-${NUCLIO_ARCH}
+ARG NUCLIO_DOCKER_REPO=quay.io/nuclio
+
+ARG ver_sdk=0.15.0b9
+ARG ver_python=0.15.0b7
+ARG ver_container=0.15.0b3
+ARG ver_modelserve=0.15.0b7
+ARG ver_dbt=0.15.0b4
+ARG ver_hera=0.15.0b4
+ARG ver_flower=0.15.0b2
+
+# GO-BUILDER (processor)
+FROM golang:1.25 AS go-builder
+WORKDIR /src/digitalhub-serverless
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . ./
+RUN set -euo pipefail; \
+    CGO_ENABLED=0 \
+      go build \
+        -ldflags="-s -w \
+          -X github.com/v3io/version-go.gitCommit=unknown \
+          -X github.com/v3io/version-go.label=latest" \
+        -o /out/processor \
+        cmd/processor/main.go
+
+# PYTHON-BASE
+FROM python:${PYTHON_VERSION}-slim AS python-base
+ARG ver_sdk
+ARG ver_python
+ARG ver_container
+ARG ver_modelserve
+ARG ver_dbt
+ARG ver_hera
+ARG ver_flower
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/* && \
+    useradd -r -m -u 8877 nonroot
+USER 8877
+RUN python -m pip install "digitalhub[full]==${ver_sdk}" \
+                          "digitalhub-runtime-python==${ver_python}"
+ENV PATH="/home/nonroot/.local/bin:$PATH"
+ENV PYTHONPATH="/home/nonroot/.local/lib/python${PYTHON_VERSION}/site-packages"
+WORKDIR /shared
+
+# PYTHON-WHEELS
+FROM python:${PYTHON_VERSION}-slim AS python-wheels
+COPY pkg/processor/runtime/python/py/requirements /requirements
+RUN pip download --dest /whl --exists-action i --requirement /requirements/common.txt
+
+# ONBUILD
+FROM ${NUCLIO_DOCKER_REPO}/handler-builder-python-onbuild:${NUCLIO_DOCKER_IMAGE_TAG} AS onbuild
+ARG PYTHON_VERSION
+COPY pkg/processor/runtime/python/py /opt/nuclio
+COPY --from=go-builder /out/processor /home/nuclio/bin/processor
+COPY --from=python-wheels /whl /home/nuclio/bin/py${PYTHON_VERSION}-whl
+
+# UHTTPC
+FROM nuclio/uhttpc:0.0.1-amd64 AS uhttpc
+
+# HANDLER (final image)
+FROM python-base AS handler
+LABEL org.opencontainers.image.source=https://github.com/scc-digitalhub/digitalhub-serverless
+COPY --from=onbuild /home/nuclio/bin/processor /usr/local/bin/processor
+COPY --from=onbuild /home/nuclio/bin/py /opt/nuclio/
+COPY --from=onbuild /opt/nuclio/ /opt/nuclio/
+COPY --from=onbuild /home/nuclio/bin/py*-whl/* /opt/nuclio/whl/
+COPY --from=uhttpc /home/nuclio/bin/uhttpc /usr/local/bin/uhttpc
+RUN python /opt/nuclio/whl/$(basename /opt/nuclio/whl/pip-*.whl)/pip install pip --no-index --find-links /opt/nuclio/whl \
+    && python -m pip install -r /opt/nuclio/requirements/common.txt
+HEALTHCHECK --interval=1s --timeout=3s CMD /usr/local/bin/uhttpc --url http://127.0.0.1:8082/ready || exit 1
+COPY . /opt/nuclio
+CMD [ "processor" ]

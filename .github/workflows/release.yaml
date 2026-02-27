@@ -6,8 +6,12 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 jobs:
-  build-and-push-image-processor:
+  build-and-push-image:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version: ["3.10", "3.11", "3.12", "3.13"]
     permissions:
       contents: read
       packages: write
@@ -28,173 +32,16 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5.5.1
         with:
-          images: ghcr.io/${{ github.repository }}/processor
+          images: ghcr.io/${{ github.repository }}/python-runtime
       - name: Build and push Docker image
         uses: docker/build-push-action@v5.1.0
         with:
           context: ./
           push: true
-          file: ./Dockerfile/Dockerfile-processor
+          file: ./Dockerfile.handler
           platforms: linux/amd64,linux/arm64
-          tags: ghcr.io/${{ github.repository }}/processor:${{ github.event.release.tag_name }},ghcr.io/${{ github.repository }}/processor:latest
+          tags: ghcr.io/${{ github.repository }}/python-runtime:${{ matrix.python_version }}-${{ github.event.release.tag_name }},ghcr.io/${{ github.repository }}/python-runtime:${{ matrix.python_version }}-latest
           labels: ${{ steps.meta.outputs.labels }}
-  build-and-push-image-base:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - dockerfile: ./Dockerfile/Dockerfile-base-3-13
-            image: ghcr.io/${{ github.repository }}/python-base
-            tag: 3.13-${{ github.event.release.tag_name }}
-            latest: 3.13-latest
-            context: ./
-          - dockerfile: ./Dockerfile/Dockerfile-base-3-10
-            image: ghcr.io/${{ github.repository }}/python-base
-            tag: 3.10-${{ github.event.release.tag_name }}
-            latest: 3.10-latest
-            context: ./
-          - dockerfile: ./Dockerfile/Dockerfile-base-3-11
-            image: ghcr.io/${{ github.repository }}/python-base
-            tag: 3.11-${{ github.event.release.tag_name }}
-            latest: 3.11-latest
-            context: ./
-          - dockerfile: ./Dockerfile/Dockerfile-base-3-12
-            image: ghcr.io/${{ github.repository }}/python-base
-            tag: 3.12-${{ github.event.release.tag_name }}
-            latest: 3.12-latest
-            context: ./
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Log in to the Container registry
-        uses: docker/login-action@v3.0.0
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v5.5.1
-        with:
-          images: ${{ matrix.image }}
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5.1.0
-        with:
-          context: ${{ matrix.context }}
-          push: true
-          file: ${{ matrix.dockerfile }}
-          tags: ${{ matrix.image }}:${{ matrix.tag }},${{ matrix.image }}:${{ matrix.latest }}
-          labels: ${{ steps.meta.outputs.labels }}
-  build-and-push-image-build:
-    needs:
-      - build-and-push-image-processor
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - dockerfile: ./Dockerfile/Dockerfile-onbuild-3-13
-            image: ghcr.io/${{ github.repository }}/python-onbuild
-            tag: 3.13-${{ github.event.release.tag_name }}
-            latest: 3.13-latest
-            context: ./
-          - dockerfile: ./Dockerfile/Dockerfile-onbuild-3-10
-            image: ghcr.io/${{ github.repository }}/python-onbuild
-            tag: 3.10-${{ github.event.release.tag_name }}
-            latest: 3.10-latest
-            context: ./
-          - dockerfile: ./Dockerfile/Dockerfile-onbuild-3-11
-            image: ghcr.io/${{ github.repository }}/python-onbuild
-            tag: 3.11-${{ github.event.release.tag_name }}
-            latest: 3.11-latest
-            context: ./
-          - dockerfile: ./Dockerfile/Dockerfile-onbuild-3-12
-            image: ghcr.io/${{ github.repository }}/python-onbuild
-            tag: 3.12-${{ github.event.release.tag_name }}
-            latest: 3.12-latest
-            context: ./
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Log in to the Container registry
-        uses: docker/login-action@v3.0.0
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v5.5.1
-        with:
-          images: ${{ matrix.image }}
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5.1.0
-        with:
-          context: ${{ matrix.context }}
-          push: true
-          file: ${{ matrix.dockerfile }}
-          tags: ${{ matrix.image }}:${{ matrix.tag }},${{ matrix.image }}:${{ matrix.latest }}
-          labels: ${{ steps.meta.outputs.labels }}
-  build-and-push-image-handler:
-    needs:
-      - build-and-push-image-build
-      - build-and-push-image-base
-      - build-and-push-image-processor
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - dockerfile: ./Dockerfile/Dockerfile-handler-3-13
-            image: ghcr.io/${{ github.repository }}/python-runtime
-            tag: 3.13-${{ github.event.release.tag_name }}
-            latest: 3.13-latest
-            context: ./
-          - dockerfile: ./Dockerfile/Dockerfile-handler-3-10
-            image: ghcr.io/${{ github.repository }}/python-runtime
-            tag: 3.10-${{ github.event.release.tag_name }}
-            latest: 3.10-latest
-            context: ./
-          - dockerfile: ./Dockerfile/Dockerfile-handler-3-11
-            image: ghcr.io/${{ github.repository }}/python-runtime
-            tag: 3.11-${{ github.event.release.tag_name }}
-            latest: 3.11-latest
-            context: ./
-          - dockerfile: ./Dockerfile/Dockerfile-handler-3-12
-            image: ghcr.io/${{ github.repository }}/python-runtime
-            tag: 3.12-${{ github.event.release.tag_name }}
-            latest: 3.12-latest
-            context: ./
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Log in to the Container registry
-        uses: docker/login-action@v3.0.0
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v5.5.1
-        with:
-          images: ${{ matrix.image }}
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5.1.0
-        with:
-          context: ${{ matrix.context }}
-          push: true
-          file: ${{ matrix.dockerfile }}
-          tags: ${{ matrix.image }}:${{ matrix.tag }},${{ matrix.image }}:${{ matrix.latest }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: GIT_TAG=${{ github.event.release.tag_name }}
+          build-args: |
+            GIT_TAG=${{ github.event.release.tag_name }}
+            PYTHON_VERSION=${{ matrix.python_version }}
