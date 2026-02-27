@@ -69,6 +69,7 @@ import (
 	_ "github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/trigger/job"
 	_ "github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/trigger/mjpeg"
 	_ "github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/trigger/openinference"
+	_ "github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/trigger/rtsp"
 	_ "github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/trigger/websocket"
 
 	// load all sinks

@@ -1,0 +1,3 @@
+streams:
+  mystream:
+    - ffmpeg:/config/earth.mp4
