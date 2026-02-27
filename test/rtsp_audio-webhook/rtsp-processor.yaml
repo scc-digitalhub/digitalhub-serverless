@@ -12,8 +12,15 @@ spec:
       attributes:
         rtsp_url: rtsp://localhost:8554/mystream
         is_video: false
-        output:
+        sink:
           kind: webhook
-          config:
-            url: http://localhost:8080/audio
+          attributes:
+            url: "http://localhost:8888/webhook"
+            method: "POST"
+            headers:
+              Content-Type: "application/json"
+              X-API-Key: "test-api-key-12345"
+            timeout: 10
+            maxRetries: 3
+            retryDelay: 1
       maxWorkers: 1

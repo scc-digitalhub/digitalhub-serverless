@@ -36,8 +36,11 @@ def handler(context: nuclio_sdk.Context, event: nuclio_sdk.Event):
     image = Image.open(image_data)  
     results = model.predict(image)
 
+    data_to_send = base64.b64encode(frame_bytes).decode('utf-8')
+
     payload = {"YOLO results": results[0].summary(),
-               "data": base64.b64encode(frame_bytes).decode('utf-8')
+               "data": data_to_send,
+               "Frame Size": len(frame_bytes)
                }
 
     return context.Response(

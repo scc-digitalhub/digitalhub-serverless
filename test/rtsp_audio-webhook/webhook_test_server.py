@@ -1,3 +1,18 @@
+# from flask import Flask, request
+
+# app = Flask(__name__)
+
+# @app.route("/audio", methods=["POST"])
+# def receive():
+#     print("=== GOT POST ===")
+#     print(request.json)
+#     print("================")
+#     return "ok", 200
+
+# app.run(host="0.0.0.0", port=8080)
+
+
+
 #!/usr/bin/env python3
 #
 # SPDX-FileCopyrightText: © 2025 DSLab - Fondazione Bruno Kessler
@@ -47,8 +62,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
             print(f"Request #{WebhookHandler.request_count} received")
             print(f"{'='*60}")
 
-            print(f"YOLO results: {data.get('YOLO results')}")
-            print(f"Frame Size: {data.get('Frame Size')} bytes")
+            print(f"transcription: {data.get('transcription')}")
+            print(f"size: {data.get('size')} bytes")
             
             if data.get('thumbnail'):
                 print(f"Thumbnail: {len(data.get('thumbnail'))} chars (base64)")
