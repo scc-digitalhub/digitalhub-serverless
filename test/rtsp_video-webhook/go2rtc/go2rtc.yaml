@@ -1,4 +1,3 @@
 streams:
   mystream:
-    # - ffmpeg:/config/earth.mp4#video=mjpeg
     - ffmpeg:/config/earth.mp4

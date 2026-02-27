@@ -19,17 +19,24 @@ const (
 	DefaultIsVideo            = false
 )
 
+// SinkConfiguration holds the sink config for the trigger (optional)
+type SinkConfiguration struct {
+	Kind       string         `mapstructure:"kind"`
+	Attributes map[string]any `mapstructure:"attributes"`
+}
+
 type Configuration struct {
 	trigger.Configuration
 
-	RTSPURL            string         `mapstructure:"rtsp_url"`
-	BufferSize         int            `mapstructure:"buffer_size"`
-	ChunkBytes         int            `mapstructure:"chunk_bytes"`
-	MaxBytes           int            `mapstructure:"max_bytes"`
-	TrimBytes          int            `mapstructure:"trim_bytes"`
-	ProcessingInterval time.Duration  `mapstructure:"processing_interval"`
-	IsVideo            bool           `mapstructure:"is_video"`
-	Output             map[string]any `mapstructure:"output"`
+	RTSPURL            string             `mapstructure:"rtsp_url"`
+	BufferSize         int                `mapstructure:"buffer_size"`
+	ChunkBytes         int                `mapstructure:"chunk_bytes"`
+	MaxBytes           int                `mapstructure:"max_bytes"`
+	TrimBytes          int                `mapstructure:"trim_bytes"`
+	ProcessingInterval time.Duration      `mapstructure:"processing_interval"`
+	IsVideo            bool               `mapstructure:"is_video"`
+	Output             map[string]any     `mapstructure:"output"`
+	Sink               *SinkConfiguration `mapstructure:"sink"`
 }
 
 func NewConfiguration(id string,

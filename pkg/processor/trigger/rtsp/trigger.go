@@ -6,6 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 package rtsp
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -21,20 +22,19 @@ import (
 	"github.com/nuclio/nuclio/pkg/processor/trigger"
 	"github.com/nuclio/nuclio/pkg/processor/worker"
 	"github.com/pion/rtp"
+	"github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/sink"
 )
 
 // rtspTrigger streams audio or video from a RTSP server and sends PCM audio chunks or JPEG frames to Nuclio workers.
 type rtspTrigger struct {
 	trigger.AbstractTrigger
 	configuration *Configuration
-
 	client        *gortsplib.Client
 	dataProcessor *DataProcessorStream
 	pipeline      *MediaPipeline
-
-	stop       chan struct{}
-	wg         sync.WaitGroup
-	webhookURL string
+	sink          sink.Sink
+	stop          chan struct{}
+	wg            sync.WaitGroup
 }
 
 // NewTrigger creates a new RTSP trigger
@@ -63,23 +63,31 @@ func newTrigger(logger logger.Logger,
 	}
 	t.Trigger = t
 
+	if configuration.Sink != nil && configuration.Sink.Kind != "" {
+		sinkInstance, err := sink.RegistrySingleton.Create(
+			logger,
+			configuration.Sink.Kind,
+			configuration.Sink.Attributes,
+		)
+		if err != nil {
+			return nil, errors.Wrap(err, "Failed to create sink")
+		}
+		t.sink = sinkInstance
+		logger.InfoWith("Sink configured for RTSP trigger", "kind", configuration.Sink.Kind)
+	}
+
 	return t, nil
 }
 
-// Start establishes RTSP connection and starts processing LPCM audio or video frames
 func (t *rtspTrigger) Start(checkpoint functionconfig.Checkpoint) error {
+	// logging and config up to now
 	t.Logger.InfoWith("Starting RTSP trigger", "url", t.configuration.RTSPURL)
 
-	// configure webhook if specified
-	if t.configuration.Output != nil {
-		if kind, ok := t.configuration.Output["kind"].(string); ok && kind == "webhook" {
-			if cfg, ok := t.configuration.Output["config"].(map[string]any); ok {
-				if url, ok := cfg["url"].(string); ok {
-					t.webhookURL = url
-					t.Logger.InfoWith("Webhook output configured", "url", t.webhookURL)
-				}
-			}
+	if t.sink != nil {
+		if err := t.sink.Start(); err != nil {
+			return errors.Wrap(err, "Failed to start sink")
 		}
+		t.Logger.InfoWith("Sink started", "kind", t.sink.GetKind())
 	}
 
 	// streaming processor
@@ -91,7 +99,6 @@ func (t *rtspTrigger) Start(checkpoint functionconfig.Checkpoint) error {
 	)
 	t.dataProcessor.Start(time.Millisecond * time.Duration(t.configuration.ProcessingInterval))
 
-	// parse URL
 	u, err := base.ParseURL(t.configuration.RTSPURL)
 	if err != nil {
 		return errors.Wrap(err, "parse RTSP URL")
@@ -126,7 +133,6 @@ func (t *rtspTrigger) Start(checkpoint functionconfig.Checkpoint) error {
 	t.client.OnPacketRTPAny(func(media *description.Media, forma format.Format, pkt *rtp.Packet) {
 		payload, err := t.pipeline.ProcessRTP(pkt, forma)
 		if err != nil {
-			// t.Logger.WarnWith("RTP processing error", "err", err)
 			return
 		}
 		if payload != nil {
@@ -171,8 +177,18 @@ func (t *rtspTrigger) dispatcher() {
 				continue
 			}
 
-			if typedResp, ok := resp.(nuclio.Response); ok && t.webhookURL != "" {
-				t.postToWebhook(typedResp.Body)
+			var responseData []byte
+			if typedResp, ok := resp.(nuclio.Response); ok {
+				responseData = typedResp.Body
+			}
+
+			if t.sink != nil && len(responseData) > 0 {
+				metadata := map[string]any{
+					"timestamp": ev.timestamp,
+				}
+				if err := t.sink.Write(context.Background(), responseData, metadata); err != nil {
+					t.Logger.WarnWith("Failed to write to sink", "error", err)
+				}
 			}
 		}
 	}
@@ -191,6 +207,13 @@ func (t *rtspTrigger) Stop(force bool) (functionconfig.Checkpoint, error) {
 	}
 
 	t.wg.Wait()
+
+	if t.sink != nil {
+		if err := t.sink.Stop(force); err != nil {
+			t.Logger.WarnWith("Failed to stop sink", "error", err)
+		}
+	}
+
 	t.Logger.Info("RTSP trigger stopped")
 	return nil, nil
 }

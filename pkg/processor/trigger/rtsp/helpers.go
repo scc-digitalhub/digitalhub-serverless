@@ -10,8 +10,6 @@ import (
 	"encoding/binary"
 	"image"
 	"image/jpeg"
-	"mime/multipart"
-	"net/http"
 	"sync"
 	"time"
 
@@ -19,12 +17,6 @@ import (
 	"github.com/bluenviron/gortsplib/v5/pkg/format"
 	"github.com/pion/rtp"
 )
-
-//
-// ============================================================
-// DATA PROCESSOR
-// ============================================================
-//
 
 type DataProcessorStream struct {
 	lock       sync.Mutex
@@ -37,6 +29,15 @@ type DataProcessorStream struct {
 	isVideo    bool
 	output     chan *Event
 	stop       chan struct{}
+}
+
+type MediaPipeline struct {
+	trigger *rtspTrigger
+
+	depacketizers map[uint8]any
+
+	h264Decoders map[uint8]*OpenH264Decoder
+	h264FirstIDR map[uint8]bool
 }
 
 func NewDataProcessorStream(chunkBytes, maxBytes, trimBytes int, isVideo bool) *DataProcessorStream {
@@ -134,15 +135,6 @@ func (dp *DataProcessorStream) Output() <-chan *Event {
 	return dp.output
 }
 
-type MediaPipeline struct {
-	trigger *rtspTrigger
-
-	depacketizers map[uint8]any
-
-	h264Decoders map[uint8]*OpenH264Decoder
-	h264FirstIDR map[uint8]bool
-}
-
 func NewMediaPipeline(t *rtspTrigger, medias []*description.Media) (*MediaPipeline, error) {
 
 	mp := &MediaPipeline{
@@ -190,16 +182,14 @@ func NewMediaPipeline(t *rtspTrigger, medias []*description.Media) (*MediaPipeli
 					op.Decode(initNALUs)
 				}
 
-				// t.dataProcessor.isVideo = true
 				t.Logger.Info("Video stream detected (H264)")
 
-			// ---------- H265 passthrough ----------
+			// H265 passthrough
 			case *format.H265:
 				dep, err := f.CreateDecoder()
 				if err == nil {
 					mp.depacketizers[forma.PayloadType()] = dep
 				}
-				// t.dataProcessor.isVideo = true
 			}
 		}
 	}
@@ -229,7 +219,7 @@ func (mp *MediaPipeline) ProcessRTP(pkt *rtp.Packet, forma format.Format) ([]byt
 
 			pt := forma.PayloadType()
 
-			// WAIT FIRST IDR
+			// wait first IDR
 			if !mp.h264FirstIDR[pt] {
 				if !containsIDR(au) {
 					return nil, nil
@@ -246,9 +236,7 @@ func (mp *MediaPipeline) ProcessRTP(pkt *rtp.Packet, forma format.Format) ([]byt
 		}
 	}
 
-	// ===============================
-	// GENERIC / AUDIO
-	// ===============================
+	// generic / audio
 	switch d := dep.(type) {
 
 	case interface {
@@ -301,85 +289,6 @@ func EncodeFrameToJPEG(yuv []byte, width, height int, quality int) ([]byte, erro
 		return nil, err
 	}
 	return buf.Bytes(), nil
-}
-
-// ============================================================
-// WEBHOOK
-// ============================================================
-func (t *rtspTrigger) postToWebhook(body []byte) {
-	if t.webhookURL == "" {
-		return
-	}
-
-	// Send webhook with multipart/form-data
-	// body contains the handler response; typically text or binary data
-	t.postToWebhookWithData("", body)
-}
-
-// postToWebhookWithData sends data to webhook using multipart/form-data
-// text and data fields are optional (can be empty/nil)
-func (t *rtspTrigger) postToWebhookWithData(text string, data []byte) {
-	if t.webhookURL == "" {
-		return
-	}
-
-	// Create multipart form
-	buf := &bytes.Buffer{}
-	writer := multipart.NewWriter(buf)
-
-	// Add text field if provided
-	if text != "" {
-		fw, err := writer.CreateFormField("text")
-		if err != nil {
-			t.Logger.WarnWith("Failed to create text form field", "err", err)
-			return
-		}
-		if _, err := fw.Write([]byte(text)); err != nil {
-			t.Logger.WarnWith("Failed to write text field", "err", err)
-			return
-		}
-	}
-
-	// Add data field if provided
-	if len(data) > 0 {
-		fw, err := writer.CreateFormFile("data", "frame.bin")
-		if err != nil {
-			t.Logger.WarnWith("Failed to create data form file", "err", err)
-			return
-		}
-		if _, err := fw.Write(data); err != nil {
-			t.Logger.WarnWith("Failed to write data file", "err", err)
-			return
-		}
-	}
-
-	if err := writer.Close(); err != nil {
-		t.Logger.WarnWith("Failed to close multipart writer", "err", err)
-		return
-	}
-
-	// Create and send request
-	req, err := http.NewRequest("POST", t.webhookURL, buf)
-	if err != nil {
-		t.Logger.WarnWith("Failed to create webhook request", "err", err)
-		return
-	}
-
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Logger.WarnWith("Webhook POST failed", "err", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		t.Logger.WarnWith("Webhook returned non-success status", "status", resp.StatusCode)
-		return
-	}
-
-	t.Logger.DebugWith("Webhook POST succeeded", "status", resp.StatusCode, "text_len", len(text), "data_len", len(data))
 }
 
 func convertBigEndianToLittleEndian(in []byte) []byte {

@@ -8,7 +8,7 @@ export PYTHONPATH=$CURRENT_DIR/venv3.10/lib/python3.10/site-packages
 echo "PYTHONPATH: $PYTHONPATH"
 
 # set NUCLIO_PYTHON_WRAPPER_PATH
-export NUCLIO_PYTHON_WRAPPER_PATH=$CURRENT_DIR/test/rtsp_video/_nuclio_wrapper.py
+export NUCLIO_PYTHON_WRAPPER_PATH=$CURRENT_DIR/test/rtsp_video-webhook/_nuclio_wrapper.py
 echo "NUCLIO_PYTHON_WRAPPER_PATH: $NUCLIO_PYTHON_WRAPPER_PATH"
 
-go run -tags openh264 ./cmd/processor --config=${CURRENT_DIR}/test/rtsp_video/rtsp-processor.yaml
+go run -tags openh264 ./cmd/processor --config=${CURRENT_DIR}/test/rtsp_video-webhook/rtsp-processor.yaml

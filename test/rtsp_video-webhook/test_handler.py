@@ -1,12 +1,12 @@
-import os
-import time
-import nuclio_sdk
+import base64
 import io
+import json
+import nuclio_sdk
 from PIL import Image
 from ultralytics import YOLOWorld
 
 
-model = YOLOWorld("test/rtsp_video/yolov8s-world.pt")
+model = YOLOWorld("test/rtsp_video-webhook/yolov8s-world.pt")
 
 
 def handler(context: nuclio_sdk.Context, event: nuclio_sdk.Event):
@@ -37,8 +37,11 @@ def handler(context: nuclio_sdk.Context, event: nuclio_sdk.Event):
     results = model.predict(image)
 
     payload = {"YOLO results": results[0].summary(),
-               "data": frame_bytes
+               "data": base64.b64encode(frame_bytes).decode('utf-8')
                }
 
-    context.logger.info_with(results[0].summary())
-    return payload
+    return context.Response(
+        body=json.dumps(payload),
+        status_code=200,
+        content_type="application/json"
+    )
