@@ -1,18 +1,3 @@
-# from flask import Flask, request
-
-# app = Flask(__name__)
-
-# @app.route("/audio", methods=["POST"])
-# def receive():
-#     print("=== GOT POST ===")
-#     print(request.json)
-#     print("================")
-#     return "ok", 200
-
-# app.run(host="0.0.0.0", port=8080)
-
-
-
 #!/usr/bin/env python3
 #
 # SPDX-FileCopyrightText: © 2025 DSLab - Fondazione Bruno Kessler
