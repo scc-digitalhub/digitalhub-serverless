@@ -12,11 +12,6 @@ ARG NUCLIO_DOCKER_REPO=quay.io/nuclio
 
 ARG ver_sdk=0.15.0b9
 ARG ver_python=0.15.0b8
-ARG ver_container=0.15.0b3
-ARG ver_modelserve=0.15.0b7
-ARG ver_dbt=0.15.0b4
-ARG ver_hera=0.15.0b4
-ARG ver_flower=0.15.0b2
 
 # GO-BUILDER (processor)
 FROM golang:1.25 AS go-builder
@@ -37,11 +32,6 @@ RUN set -euo pipefail; \
 FROM python:${PYTHON_VERSION}-slim AS python-base
 ARG ver_sdk
 ARG ver_python
-ARG ver_container
-ARG ver_modelserve
-ARG ver_dbt
-ARG ver_hera
-ARG ver_flower
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/* && \
     useradd -r -m -u 8877 nonroot
 USER 8877
