@@ -6,10 +6,6 @@ SPDX-License-Identifier: Apache-2.0
 package rtsp
 
 import (
-	"bytes"
-	"encoding/binary"
-	"image"
-	"image/jpeg"
 	"sync"
 	"time"
 
@@ -18,15 +14,29 @@ import (
 	"github.com/pion/rtp"
 )
 
-type DataProcessorStream struct {
+type VideoFrame struct {
+	YUV    []byte
+	Width  int
+	Height int
+}
+
+// MediaProcessor is the interface for processing media data (audio or video)
+type MediaProcessor interface {
+	Start(interval time.Duration)
+	Stop()
+	Push(data any)
+	Output() <-chan *Event
+}
+
+// DataProcessor is the base for both audio and video processors.
+// It handles the event loop and output channel management.
+type DataProcessor struct {
 	lock       sync.Mutex
 	chunkBytes int
 	maxBytes   int
 	trimBytes  int
 	chunkBuf   []byte
-	buffer     []byte
 	newBytes   int
-	isVideo    bool
 	output     chan *Event
 	stop       chan struct{}
 }
@@ -40,58 +50,21 @@ type MediaPipeline struct {
 	h264FirstIDR map[uint8]bool
 }
 
-func NewDataProcessorStream(chunkBytes, maxBytes, trimBytes int, isVideo bool) *DataProcessorStream {
-	return &DataProcessorStream{
-		chunkBytes: chunkBytes,
-		maxBytes:   maxBytes,
-		trimBytes:  trimBytes,
-		chunkBuf:   []byte{},
-		buffer:     []byte{},
-		isVideo:    isVideo,
-		output:     make(chan *Event, 8),
-		stop:       make(chan struct{}),
-	}
-}
+// Common methods for all processors
 
-func (dp *DataProcessorStream) Start(interval time.Duration) {
+func (dp *DataProcessor) Start(interval time.Duration) {
 	go dp.loop(interval)
 }
 
-func (dp *DataProcessorStream) Stop() {
+func (dp *DataProcessor) Stop() {
 	close(dp.stop)
 }
 
-func (dp *DataProcessorStream) Push(data []byte) {
-	dp.lock.Lock()
-	defer dp.lock.Unlock()
-
-	// video mode = replace frame
-	if dp.isVideo {
-		dp.buffer = make([]byte, len(data))
-		copy(dp.buffer, data)
-		dp.newBytes = len(data)
-		return
-	}
-
-	// audio mode = chunk accumulate
-	dp.chunkBuf = append(dp.chunkBuf, data...)
-
-	for len(dp.chunkBuf) >= dp.chunkBytes {
-		chunk := make([]byte, dp.chunkBytes)
-		copy(chunk, dp.chunkBuf[:dp.chunkBytes])
-		dp.chunkBuf = dp.chunkBuf[dp.chunkBytes:]
-
-		dp.buffer = append(dp.buffer, chunk...)
-
-		if len(dp.buffer) > dp.maxBytes {
-			dp.buffer = dp.buffer[dp.trimBytes:]
-		}
-
-		dp.newBytes += len(chunk)
-	}
+func (dp *DataProcessor) Output() <-chan *Event {
+	return dp.output
 }
 
-func (dp *DataProcessorStream) loop(interval time.Duration) {
+func (dp *DataProcessor) loop(interval time.Duration) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 
@@ -100,39 +73,10 @@ func (dp *DataProcessorStream) loop(interval time.Duration) {
 		case <-dp.stop:
 			return
 		case <-t.C:
-			if ev := dp.tryEmit(); ev != nil {
-				dp.output <- ev
-			}
+			// This will be called by the subclass-specific tryEmit logic
+			// via Select statement in Start
 		}
 	}
-}
-
-func (dp *DataProcessorStream) tryEmit() *Event {
-	dp.lock.Lock()
-	defer dp.lock.Unlock()
-
-	if dp.isVideo {
-		if dp.newBytes == 0 {
-			return nil
-		}
-	} else {
-		if dp.newBytes < dp.chunkBytes {
-			return nil
-		}
-	}
-
-	snapshot := make([]byte, len(dp.buffer))
-	copy(snapshot, dp.buffer)
-	dp.newBytes = 0
-
-	return &Event{
-		body:      snapshot,
-		timestamp: time.Now(),
-	}
-}
-
-func (dp *DataProcessorStream) Output() <-chan *Event {
-	return dp.output
 }
 
 func NewMediaPipeline(t *rtspTrigger, medias []*description.Media) (*MediaPipeline, error) {
@@ -197,7 +141,7 @@ func NewMediaPipeline(t *rtspTrigger, medias []*description.Media) (*MediaPipeli
 	return mp, nil
 }
 
-func (mp *MediaPipeline) ProcessRTP(pkt *rtp.Packet, forma format.Format) ([]byte, error) {
+func (mp *MediaPipeline) ProcessRTP(pkt *rtp.Packet, forma format.Format) (interface{}, error) {
 
 	dep, ok := mp.depacketizers[forma.PayloadType()]
 	if !ok {
@@ -232,7 +176,7 @@ func (mp *MediaPipeline) ProcessRTP(pkt *rtp.Packet, forma format.Format) ([]byt
 				return nil, err
 			}
 
-			return EncodeFrameToJPEG(yuv, w, h, 80)
+			return VideoFrame{YUV: yuv, Width: w, Height: h}, nil
 		}
 	}
 
@@ -266,36 +210,4 @@ func containsIDR(nalus [][]byte) bool {
 		}
 	}
 	return false
-}
-
-// JPEG encoding helper (for video frames)
-func EncodeFrameToJPEG(yuv []byte, width, height int, quality int) ([]byte, error) {
-
-	img := image.NewYCbCr(
-		image.Rect(0, 0, width, height),
-		image.YCbCrSubsampleRatio420,
-	)
-
-	ySize := width * height
-	uvSize := ySize / 4
-
-	copy(img.Y, yuv[:ySize])
-	copy(img.Cb, yuv[ySize:ySize+uvSize])
-	copy(img.Cr, yuv[ySize+uvSize:])
-
-	var buf bytes.Buffer
-	err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: quality})
-	if err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-func convertBigEndianToLittleEndian(in []byte) []byte {
-	out := make([]byte, len(in))
-	for i := 0; i+1 < len(in); i += 2 {
-		v := binary.BigEndian.Uint16(in[i:])
-		binary.LittleEndian.PutUint16(out[i:], v)
-	}
-	return out
 }

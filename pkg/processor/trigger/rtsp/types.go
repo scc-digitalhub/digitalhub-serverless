@@ -16,7 +16,7 @@ const (
 	DefaultMaxBytes           = 1440000
 	DefaultTrimBytes          = 1120000
 	DefaultProcessingInterval = 2000
-	DefaultIsVideo            = false
+	DefaultMediaType          = "audio"
 )
 
 // SinkConfiguration holds the sink config for the trigger (optional)
@@ -34,10 +34,13 @@ type Configuration struct {
 	MaxBytes           int                `mapstructure:"max_bytes"`
 	TrimBytes          int                `mapstructure:"trim_bytes"`
 	ProcessingInterval time.Duration      `mapstructure:"processing_interval"`
-	IsVideo            bool               `mapstructure:"is_video"`
+	MediaType          string             `mapstructure:"media_type"` // "audio" or "video"
 	Output             map[string]any     `mapstructure:"output"`
 	Sink               *SinkConfiguration `mapstructure:"sink"`
+	// IsVideo            bool               `mapstructure:"is_video"`
 }
+
+// media_type : audio / video
 
 func NewConfiguration(id string,
 	triggerConfiguration *functionconfig.Trigger,
@@ -51,7 +54,7 @@ func NewConfiguration(id string,
 		MaxBytes:           DefaultMaxBytes,
 		TrimBytes:          DefaultTrimBytes,
 		ProcessingInterval: DefaultProcessingInterval,
-		IsVideo:            DefaultIsVideo,
+		MediaType:          DefaultMediaType,
 	}
 
 	// Base trigger config

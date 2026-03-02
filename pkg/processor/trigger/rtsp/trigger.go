@@ -28,13 +28,13 @@ import (
 // rtspTrigger streams audio or video from a RTSP server and sends PCM audio chunks or JPEG frames to Nuclio workers.
 type rtspTrigger struct {
 	trigger.AbstractTrigger
-	configuration *Configuration
-	client        *gortsplib.Client
-	dataProcessor *DataProcessorStream
-	pipeline      *MediaPipeline
-	sink          sink.Sink
-	stop          chan struct{}
-	wg            sync.WaitGroup
+	configuration  *Configuration
+	client         *gortsplib.Client
+	mediaProcessor MediaProcessor
+	pipeline       *MediaPipeline
+	sink           sink.Sink
+	stop           chan struct{}
+	wg             sync.WaitGroup
 }
 
 // NewTrigger creates a new RTSP trigger
@@ -90,14 +90,24 @@ func (t *rtspTrigger) Start(checkpoint functionconfig.Checkpoint) error {
 		t.Logger.InfoWith("Sink started", "kind", t.sink.GetKind())
 	}
 
-	// streaming processor
-	t.dataProcessor = NewDataProcessorStream(
-		t.configuration.ChunkBytes,
-		t.configuration.MaxBytes,
-		t.configuration.TrimBytes,
-		t.configuration.IsVideo,
-	)
-	t.dataProcessor.Start(time.Millisecond * time.Duration(t.configuration.ProcessingInterval))
+	// streaming processor - create the appropriate processor based on media type
+	if t.configuration.MediaType == "audio" {
+		t.mediaProcessor = NewAudioProcessor(
+			t.configuration.ChunkBytes,
+			t.configuration.MaxBytes,
+			t.configuration.TrimBytes,
+		)
+	} else if t.configuration.MediaType == "video" {
+		t.mediaProcessor = NewVideoProcessor(
+			t.configuration.ChunkBytes,
+			t.configuration.MaxBytes,
+			t.configuration.TrimBytes,
+		)
+	} else {
+		return errors.New("unsupported media type: " + t.configuration.MediaType)
+	}
+
+	t.mediaProcessor.Start(time.Millisecond * time.Duration(t.configuration.ProcessingInterval))
 
 	u, err := base.ParseURL(t.configuration.RTSPURL)
 	if err != nil {
@@ -136,7 +146,7 @@ func (t *rtspTrigger) Start(checkpoint functionconfig.Checkpoint) error {
 			return
 		}
 		if payload != nil {
-			t.dataProcessor.Push(payload)
+			t.mediaProcessor.Push(payload)
 		}
 	})
 
@@ -159,7 +169,7 @@ func (t *rtspTrigger) dispatcher() {
 		case <-t.stop:
 			t.Logger.Info("RTSP dispatcher stopping")
 			return
-		case ev := <-t.dataProcessor.Output():
+		case ev := <-t.mediaProcessor.Output():
 			if ev == nil {
 				continue
 			}
@@ -202,8 +212,8 @@ func (t *rtspTrigger) Stop(force bool) (functionconfig.Checkpoint, error) {
 		t.client.Close()
 	}
 
-	if t.dataProcessor != nil {
-		t.dataProcessor.Stop()
+	if t.mediaProcessor != nil {
+		t.mediaProcessor.Stop()
 	}
 
 	t.wg.Wait()
