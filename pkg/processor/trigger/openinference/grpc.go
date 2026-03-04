@@ -11,7 +11,11 @@ package openinference
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
+	"fmt"
+	"math"
+	"strings"
 	"time"
 
 	"github.com/nuclio/nuclio-sdk-go"
@@ -206,7 +210,7 @@ func (s *grpcInferenceServer) convertGRPCToRESTRequest(req *pb.ModelInferRequest
 			Shape:      input.Shape,
 			Datatype:   input.Datatype,
 			Parameters: make(map[string]any),
-			Data:       s.convertTensorContents(input.Contents, input.Datatype),
+			Data:       s.convertTensorContents(input.Contents, req.RawInputContents, i, input.Datatype),
 		}
 
 		for key, param := range input.Parameters {
@@ -317,31 +321,39 @@ func (s *grpcInferenceServer) convertRESTToGRPCResponse(resp *RESTInferenceRespo
 }
 
 // Helper to convert tensor contents from protobuf to generic data
-func (s *grpcInferenceServer) convertTensorContents(contents *pb.InferTensorContents, datatype string) any {
-	if contents == nil {
-		return nil
+func (s *grpcInferenceServer) convertTensorContents(contents *pb.InferTensorContents, rawInputContents [][]byte, index int, datatype string) any {
+	if contents != nil {
+		switch datatype {
+		case "BOOL":
+			return contents.BoolContents
+		case "INT8", "INT16", "INT32":
+			return contents.IntContents
+		case "INT64":
+			return contents.Int64Contents
+		case "UINT8", "UINT16", "UINT32":
+			return contents.UintContents
+		case "UINT64":
+			return contents.Uint64Contents
+		case "FP32":
+			return contents.Fp32Contents
+		case "FP64":
+			return contents.Fp64Contents
+		case "BYTES":
+			return contents.BytesContents
+		default:
+			return nil
+		}
+	} else if rawInputContents != nil && index < len(rawInputContents) {
+		// If contents is nil, try to convert raw input byte array contents based on datatype
+		rawData := rawInputContents[index]
+		res, err := BytesToTensor(datatype, rawData)
+		if err != nil {
+			return nil
+		}
+		return res
 	}
 
-	switch datatype {
-	case "BOOL":
-		return contents.BoolContents
-	case "INT8", "INT16", "INT32":
-		return contents.IntContents
-	case "INT64":
-		return contents.Int64Contents
-	case "UINT8", "UINT16", "UINT32":
-		return contents.UintContents
-	case "UINT64":
-		return contents.Uint64Contents
-	case "FP32":
-		return contents.Fp32Contents
-	case "FP64":
-		return contents.Fp64Contents
-	case "BYTES":
-		return contents.BytesContents
-	default:
-		return nil
-	}
+	return nil
 }
 
 // Helper to convert generic data to tensor contents protobuf
@@ -459,4 +471,164 @@ func (s *grpcInferenceServer) convertDataToTensorContents(data any, datatype str
 	}
 
 	return contents
+}
+
+func BytesToTensor(dataType string, data []byte) (any, error) {
+	// Normalize data type to uppercase
+	dataType = strings.ToUpper(dataType)
+
+	switch dataType {
+	case "BOOL":
+		result := make([]bool, len(data))
+		for i, b := range data {
+			result[i] = b != 0
+		}
+		return result, nil
+	case "BYTES":
+		return string(data), nil
+
+	case "UINT8":
+		// Convert to []int to avoid base64 encoding in JSON
+		result := make([]int, len(data))
+		for i, b := range data {
+			result[i] = int(b)
+		}
+		return result, nil
+
+	case "INT8":
+		result := make([]int, len(data))
+		for i, b := range data {
+			result[i] = int(int8(b))
+		}
+		return result, nil
+
+	case "UINT16":
+		if len(data)%2 != 0 {
+			return nil, fmt.Errorf("tensor: data length %d is not a multiple of 2 for UINT16", len(data))
+		}
+		result := make([]uint16, len(data)/2)
+		for i := range result {
+			result[i] = binary.LittleEndian.Uint16(data[i*2 : i*2+2])
+		}
+		return result, nil
+
+	case "INT16":
+		if len(data)%2 != 0 {
+			return nil, fmt.Errorf("tensor: data length %d is not a multiple of 2 for INT16", len(data))
+		}
+		result := make([]int16, len(data)/2)
+		for i := range result {
+			result[i] = int16(binary.LittleEndian.Uint16(data[i*2 : i*2+2]))
+		}
+		return result, nil
+
+	case "UINT32":
+		if len(data)%4 != 0 {
+			return nil, fmt.Errorf("tensor: data length %d is not a multiple of 4 for UINT32", len(data))
+		}
+		result := make([]uint32, len(data)/4)
+		for i := range result {
+			result[i] = binary.LittleEndian.Uint32(data[i*4 : i*4+4])
+		}
+		return result, nil
+
+	case "INT32":
+		if len(data)%4 != 0 {
+			return nil, fmt.Errorf("tensor: data length %d is not a multiple of 4 for INT32", len(data))
+		}
+		result := make([]int32, len(data)/4)
+		for i := range result {
+			result[i] = int32(binary.LittleEndian.Uint32(data[i*4 : i*4+4]))
+		}
+		return result, nil
+
+	case "UINT64":
+		if len(data)%8 != 0 {
+			return nil, fmt.Errorf("tensor: data length %d is not a multiple of 8 for UINT64", len(data))
+		}
+		result := make([]uint64, len(data)/8)
+		for i := range result {
+			result[i] = binary.LittleEndian.Uint64(data[i*8 : i*8+8])
+		}
+		return result, nil
+
+	case "INT64":
+		if len(data)%8 != 0 {
+			return nil, fmt.Errorf("tensor: data length %d is not a multiple of 8 for INT64", len(data))
+		}
+		result := make([]int64, len(data)/8)
+		for i := range result {
+			result[i] = int64(binary.LittleEndian.Uint64(data[i*8 : i*8+8]))
+		}
+		return result, nil
+
+	case "FP16":
+		// FP16 (half precision) - convert to float32 for JSON representation
+		if len(data)%2 != 0 {
+			return nil, fmt.Errorf("tensor: data length %d is not a multiple of 2 for FP16", len(data))
+		}
+		result := make([]float32, len(data)/2)
+		for i := range result {
+			bits := binary.LittleEndian.Uint16(data[i*2 : i*2+2])
+			result[i] = float16ToFloat32(bits)
+		}
+		return result, nil
+
+	case "FP32":
+		if len(data)%4 != 0 {
+			return nil, fmt.Errorf("tensor: data length %d is not a multiple of 4 for FP32", len(data))
+		}
+		result := make([]float32, len(data)/4)
+		for i := range result {
+			bits := binary.LittleEndian.Uint32(data[i*4 : i*4+4])
+			result[i] = math.Float32frombits(bits)
+		}
+		return result, nil
+
+	case "FP64":
+		if len(data)%8 != 0 {
+			return nil, fmt.Errorf("tensor: data length %d is not a multiple of 8 for FP64", len(data))
+		}
+		result := make([]float64, len(data)/8)
+		for i := range result {
+			bits := binary.LittleEndian.Uint64(data[i*8 : i*8+8])
+			result[i] = math.Float64frombits(bits)
+		}
+		return result, nil
+
+	default:
+		return nil, fmt.Errorf("tensor: unsupported data type '%s'. Supported types: BOOL, UINT8, INT8, UINT16, INT16, UINT32, INT32, UINT64, INT64, FP16, FP32, FP64, BYTES", dataType)
+	}
+}
+
+func float16ToFloat32(bits uint16) float32 {
+	// Extract sign, exponent, and mantissa
+	sign := uint32(bits&0x8000) << 16
+	exponent := uint32(bits&0x7C00) >> 10
+	mantissa := uint32(bits & 0x03FF)
+
+	var result uint32
+	if exponent == 0 {
+		if mantissa == 0 {
+			// Zero
+			result = sign
+		} else {
+			// Denormalized number
+			exponent = 1
+			for (mantissa & 0x400) == 0 {
+				mantissa <<= 1
+				exponent--
+			}
+			mantissa &= 0x3FF
+			result = sign | ((exponent + 112) << 23) | (mantissa << 13)
+		}
+	} else if exponent == 0x1F {
+		// Infinity or NaN
+		result = sign | 0x7F800000 | (mantissa << 13)
+	} else {
+		// Normalized number
+		result = sign | ((exponent + 112) << 23) | (mantissa << 13)
+	}
+
+	return math.Float32frombits(result)
 }

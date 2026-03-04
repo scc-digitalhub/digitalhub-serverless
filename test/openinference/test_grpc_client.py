@@ -23,6 +23,7 @@ Requirements:
 import sys
 import time
 import argparse
+import numpy as np
 
 import grpc_service_pb2, grpc_service_pb2_grpc
 
@@ -40,7 +41,7 @@ except ImportError as e:
 
 SERVER_ADDRESS = "localhost:9000"
 MODEL_NAME = "test-model"
-MODEL_VERSION = "1.0.0"
+MODEL_VERSION = "1.0"
 
 def print_section(title):
     """Print a section header"""
@@ -96,7 +97,7 @@ def test_model_metadata(stub):
     )
     response = stub.ModelMetadata(request)
     print(f"Model Name: {response.name}")
-    print(f"Model Version: {response.version}")
+    print(f"Model Version: {response.versions[0]}")
     print(f"Inputs: {len(response.inputs)} tensors")
     for inp in response.inputs:
         print(f"  - {inp.name}: {inp.datatype} {inp.shape}")
@@ -104,12 +105,35 @@ def test_model_metadata(stub):
     for out in response.outputs:
         print(f"  - {out.name}: {out.datatype} {out.shape}")
     assert response.name == MODEL_NAME
-    assert response.version == MODEL_VERSION
+    assert response.versions[0] == MODEL_VERSION
 
 def test_inference_fp32(stub):
     """Test inference with FP32 data"""
     print_section("Testing FP32 Inference (gRPC)")
-    print("⚠️  gRPC test placeholder - requires proto code generation")
+    request = grpc_service_pb2.ModelInferRequest(
+        model_name=MODEL_NAME,
+        model_version=MODEL_VERSION,
+        inputs=[
+            grpc_service_pb2.ModelInferRequest.InferInputTensor(
+                name="input",
+                datatype="FP32",
+                shape=[1, 3],
+                contents=grpc_service_pb2.InferTensorContents(
+                    fp32_contents=[0.1, 0.2, 0.3]
+                )
+            )
+        ]
+    )
+    response = stub.ModelInfer(request)
+    print(f"Inference Response: {response}")
+    assert response.model_name == MODEL_NAME
+    assert response.model_version == MODEL_VERSION
+    assert len(response.outputs) == 1
+    output = response.outputs[0]
+    assert output.name == "output_input"
+    assert output.datatype == "FP32"
+    assert output.shape == [1, 3]
+    assert np.allclose(output.contents.fp32_contents, [0.2, 0.4, 0.6])
 
 def run_grpc_tests():
     """Run all gRPC tests"""
@@ -121,12 +145,6 @@ def run_grpc_tests():
         print("\n⚠️  gRPC libraries not available")
         print("Install with: pip install grpcio grpcio-tools")
         return 1
-    
-    print("\n⚠️  gRPC test client is a placeholder")
-    print("To implement full gRPC tests:")
-    print("1. Generate Python code from proto files")
-    print("2. Import the generated modules")
-    print("3. Implement test methods using the gRPC stub")
     
     # Example of how to connect (when proto code is generated):
     try:
