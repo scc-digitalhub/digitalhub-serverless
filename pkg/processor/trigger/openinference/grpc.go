@@ -465,8 +465,18 @@ func (s *grpcInferenceServer) convertDataToTensorContents(data any, datatype str
 			contents.Fp64Contents = floats
 		}
 	case "BYTES":
-		if bytes, ok := data.([][]byte); ok {
-			contents.BytesContents = bytes
+		// Convert from []byte to [][]byte
+		if bytes, ok := data.([]byte); ok {
+			contents.BytesContents = make([][]byte, 0)
+			contents.BytesContents = append(contents.BytesContents, bytes)
+			// if array of any, convert to [][]byte if they are strings
+		} else if arr, ok := data.([]any); ok {
+			contents.BytesContents = make([][]byte, len(arr))
+			for i, v := range arr {
+				if s, ok := v.(string); ok {
+					contents.BytesContents[i] = []byte(s)
+				}
+			}
 		}
 	}
 
