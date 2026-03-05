@@ -21,13 +21,13 @@ type MediaProcessor interface {
 	// Stop signals the processor to stop
 	Stop()
 	// ProcessRTP decodes an RTP packet based on format type
-	ProcessRTP(pkt *rtp.Packet, forma format.Format) (interface{}, error)
+	ProcessRTP(pkt *rtp.Packet, forma format.Format) (any, error)
 	// Push adds data to be processed
-	Push(data interface{})
+	Push(data any)
 	// Output returns the channel for processed events
 	Output() <-chan *Event
 	// SetPipeline sets the underlying media pipeline processor
-	SetPipeline(p interface{})
+	SetPipeline(p any)
 }
 
 // BaseMediaProcessor is the abstract base for all media processors
@@ -41,7 +41,7 @@ type BaseMediaProcessor struct {
 	NewBytes      int
 	OutputChannel chan *Event
 	StopChannel   chan struct{}
-	pipeline      interface{} // holds the underlying media pipeline processor
+	pipeline      any // holds the underlying media pipeline processor
 }
 
 // BaseStart starts the processor's event loop
@@ -93,11 +93,11 @@ func NewBaseMediaProcessor(chunkBytes, maxBytes, trimBytes int) *BaseMediaProces
 }
 
 // SetPipeline sets the underlying media pipeline processor
-func (bmp *BaseMediaProcessor) SetPipeline(p interface{}) {
+func (bmp *BaseMediaProcessor) SetPipeline(p any) {
 	bmp.pipeline = p
 }
 
 // GetPipeline returns the underlying media pipeline processor
-func (bmp *BaseMediaProcessor) GetPipeline() interface{} {
+func (bmp *BaseMediaProcessor) GetPipeline() any {
 	return bmp.pipeline
 }

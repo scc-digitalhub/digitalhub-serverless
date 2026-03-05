@@ -224,7 +224,7 @@ func (t *rtspTrigger) dispatcher() {
 		}
 
 		if t.sink != nil && len(responseData) > 0 {
-			metadata := map[string]interface{}{
+			metadata := map[string]any{
 				"timestamp": ev.Timestamp,
 			}
 			if err := t.sink.Write(context.Background(), responseData, metadata); err != nil {
@@ -257,6 +257,6 @@ func (t *rtspTrigger) Stop(force bool) (functionconfig.Checkpoint, error) {
 	return nil, nil
 }
 
-func (t *rtspTrigger) GetConfig() map[string]interface{} {
+func (t *rtspTrigger) GetConfig() map[string]any {
 	return common.StructureToMap(t.configuration)
 }

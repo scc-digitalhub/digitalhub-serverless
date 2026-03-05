@@ -15,14 +15,14 @@ import (
 
 // MediaPipeline handles RTP depacketization and format-specific processing
 type MediaPipeline struct {
-	Depacketizers map[uint8]interface{}
+	Depacketizers map[uint8]any
 }
 
 // NewMediaPipeline creates a media pipeline for processing RTP streams
 func NewMediaPipeline(medias []*description.Media) (*MediaPipeline, error) {
 
 	mp := &MediaPipeline{
-		Depacketizers: make(map[uint8]interface{}),
+		Depacketizers: make(map[uint8]any),
 	}
 
 	for _, media := range medias {
@@ -59,7 +59,7 @@ func NewMediaPipeline(medias []*description.Media) (*MediaPipeline, error) {
 }
 
 // ProcessRTP handles generic RTP packet processing (audio, H265, etc.)
-func (mp *MediaPipeline) ProcessRTP(pkt *rtp.Packet, forma format.Format) (interface{}, error) {
+func (mp *MediaPipeline) ProcessRTP(pkt *rtp.Packet, forma format.Format) (any, error) {
 
 	dep, ok := mp.Depacketizers[forma.PayloadType()]
 	if !ok {

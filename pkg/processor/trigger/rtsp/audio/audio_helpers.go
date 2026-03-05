@@ -29,7 +29,7 @@ func NewAudioProcessor(chunkBytes, maxBytes, trimBytes int) *AudioProcessor {
 }
 
 // Push adds audio data to be processed, accumulating into fixed-size chunks
-func (ap *AudioProcessor) Push(data interface{}) {
+func (ap *AudioProcessor) Push(data any) {
 	ap.Lock.Lock()
 	defer ap.Lock.Unlock()
 
@@ -87,7 +87,7 @@ func (ap *AudioProcessor) eventLoop(interval time.Duration) {
 }
 
 // ProcessRTP handles audio RTP packet depacketization
-func (ap *AudioProcessor) ProcessRTP(pkt *rtp.Packet, forma format.Format) (interface{}, error) {
+func (ap *AudioProcessor) ProcessRTP(pkt *rtp.Packet, forma format.Format) (any, error) {
 	pipeline := ap.BaseMediaProcessor.GetPipeline()
 	if pipeline == nil {
 		return pkt.Payload, nil

@@ -17,7 +17,7 @@ import (
 type Event struct {
 	nuclio.AbstractEvent
 	Body       []byte
-	Attributes map[string]interface{}
+	Attributes map[string]any
 	Timestamp  time.Time
 }
 
@@ -41,8 +41,8 @@ func (e *Event) GetHeaderByteSlice(key string) []byte {
 	return nil
 }
 
-// GetHeader returns a header value as an interface{}
-func (e *Event) GetHeader(key string) interface{} {
+// GetHeader returns a header value as an any
+func (e *Event) GetHeader(key string) any {
 	if e.Attributes == nil {
 		return nil
 	}
@@ -50,7 +50,7 @@ func (e *Event) GetHeader(key string) interface{} {
 }
 
 // GetHeaders returns all attributes as headers
-func (e *Event) GetHeaders() map[string]interface{} {
+func (e *Event) GetHeaders() map[string]any {
 	return e.Attributes
 }
 
@@ -107,12 +107,12 @@ func (e *Event) GetFieldInt(key string) (int, error) {
 }
 
 // GetFields returns all attributes
-func (e *Event) GetFields() map[string]interface{} {
+func (e *Event) GetFields() map[string]any {
 	return e.Attributes
 }
 
 // GetField returns an attribute by key
-func (e *Event) GetField(key string) interface{} {
+func (e *Event) GetField(key string) any {
 	return e.GetHeader(key)
 }
 

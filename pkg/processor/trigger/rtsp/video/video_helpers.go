@@ -96,7 +96,7 @@ func NewVideoMediaPipeline(rtspLogger logger.Logger, medias []*description.Media
 }
 
 // ProcessRTP handles H.264 video RTP packet processing for VideoProcessor
-func (vp *VideoProcessor) ProcessRTP(pkt *rtp.Packet, forma format.Format) (interface{}, error) {
+func (vp *VideoProcessor) ProcessRTP(pkt *rtp.Packet, forma format.Format) (any, error) {
 	pipeline := vp.BaseMediaProcessor.GetPipeline()
 	if pipeline == nil {
 		return pkt.Payload, nil
@@ -112,7 +112,7 @@ func (vp *VideoProcessor) ProcessRTP(pkt *rtp.Packet, forma format.Format) (inte
 
 // ProcessRTP_Internal handles H.264 video RTP packet processing with frame decoding.
 // It is the internal implementation called by VideoProcessor.ProcessRTP.
-func (vmp *VideoMediaPipeline) ProcessRTP(pkt *rtp.Packet, forma format.Format) (interface{}, error) {
+func (vmp *VideoMediaPipeline) ProcessRTP(pkt *rtp.Packet, forma format.Format) (any, error) {
 
 	dep, ok := vmp.Depacketizers[forma.PayloadType()]
 	if !ok {
@@ -156,7 +156,7 @@ func (vmp *VideoMediaPipeline) ProcessRTP(pkt *rtp.Packet, forma format.Format) 
 }
 
 // Push stores the latest video frame for processing
-func (vp *VideoProcessor) Push(data interface{}) {
+func (vp *VideoProcessor) Push(data any) {
 	vp.Lock.Lock()
 	defer vp.Lock.Unlock()
 
