@@ -6,6 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 package audio
 
 import (
+	"encoding/binary"
 	"time"
 
 	"github.com/bluenviron/gortsplib/v5/pkg/format"
@@ -86,7 +87,7 @@ func (ap *AudioProcessor) eventLoop(interval time.Duration) {
 	ap.CommonEventLoop(interval, ap.tryEmit)
 }
 
-// ProcessRTP handles audio RTP packet depacketization
+// ProcessRTP handles audio RTP packet depacketization and endianness conversion
 func (ap *AudioProcessor) ProcessRTP(pkt *rtp.Packet, forma format.Format) (any, error) {
 	pipeline := ap.BaseMediaProcessor.GetPipeline()
 	if pipeline == nil {
@@ -98,5 +99,27 @@ func (ap *AudioProcessor) ProcessRTP(pkt *rtp.Packet, forma format.Format) (any,
 		return pkt.Payload, nil
 	}
 
-	return mp.ProcessRTP(pkt, forma)
+	payload, err := mp.ProcessRTP(pkt, forma)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert big endian PCM to little endian (common format for audio processing)
+	// go2rtc always streams in big endian
+	if bytes, ok := payload.([]byte); ok {
+		payload = convertBigEndianToLittleEndian(bytes)
+	}
+
+	return payload, nil
+}
+
+// convertBigEndianToLittleEndian turns a byte slice representing PCM audio
+// from big-endian 16-bit samples into little-endian format.
+func convertBigEndianToLittleEndian(in []byte) []byte {
+	out := make([]byte, len(in))
+	for i := 0; i+1 < len(in); i += 2 {
+		v := binary.BigEndian.Uint16(in[i:])
+		binary.LittleEndian.PutUint16(out[i:], v)
+	}
+	return out
 }

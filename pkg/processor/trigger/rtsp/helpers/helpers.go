@@ -6,8 +6,6 @@ SPDX-License-Identifier: Apache-2.0
 package helpers
 
 import (
-	"encoding/binary"
-
 	"github.com/bluenviron/gortsplib/v5/pkg/description"
 	"github.com/bluenviron/gortsplib/v5/pkg/format"
 	"github.com/pion/rtp"
@@ -76,23 +74,8 @@ func (mp *MediaPipeline) ProcessRTP(pkt *rtp.Packet, forma format.Format) (any, 
 		if err != nil || len(payload) == 0 {
 			return nil, err
 		}
-
-		// convert big endian PCM to little endian (common format for audio processing)
-		// go2rtp always streams in big endian
-		payload = convertBigEndianToLittleEndian(payload)
 		return payload, nil
 	}
 
 	return pkt.Payload, nil
-}
-
-// convertBigEndianToLittleEndian turns a byte slice representing PCM audio
-// from big-endian 16-bit samples into little-endian format.
-func convertBigEndianToLittleEndian(in []byte) []byte {
-	out := make([]byte, len(in))
-	for i := 0; i+1 < len(in); i += 2 {
-		v := binary.BigEndian.Uint16(in[i:])
-		binary.LittleEndian.PutUint16(out[i:], v)
-	}
-	return out
 }
