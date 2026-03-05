@@ -23,24 +23,26 @@ import (
 	"github.com/nuclio/nuclio/pkg/processor/worker"
 	"github.com/pion/rtp"
 	"github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/sink"
+	"github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/trigger/rtsp/audio"
+	"github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/trigger/rtsp/helpers"
+	"github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/trigger/rtsp/video"
 )
 
-// rtspTrigger streams audio or video from a RTSP server and sends PCM audio chunks or JPEG frames to Nuclio workers.
+// rtspTrigger is the main RTSP streaming trigger.
+// It owns configuration, runtime state, and media processing.
 type rtspTrigger struct {
 	trigger.AbstractTrigger
-	configuration  *Configuration
-	client         *gortsplib.Client
-	mediaProcessor MediaProcessor
-	pipeline       *MediaPipeline
+	configuration  *helpers.Configuration
 	sink           sink.Sink
-	stop           chan struct{}
+	client         *gortsplib.Client
+	mediaProcessor helpers.MediaProcessor
 	wg             sync.WaitGroup
 }
 
-// NewTrigger creates a new RTSP trigger
+// NewTrigger creates a new RTSP trigger instance
 func newTrigger(logger logger.Logger,
 	workerAllocator worker.Allocator,
-	configuration *Configuration,
+	configuration *helpers.Configuration,
 	restartTriggerChan chan trigger.Trigger) (trigger.Trigger, error) {
 
 	abstract, err := trigger.NewAbstractTrigger(
@@ -59,8 +61,10 @@ func newTrigger(logger logger.Logger,
 	t := &rtspTrigger{
 		AbstractTrigger: abstract,
 		configuration:   configuration,
-		stop:            make(chan struct{}),
+		client:          nil,
+		mediaProcessor:  nil,
 	}
+	// set the trigger interface to our wrapper so methods dispatch correctly
 	t.Trigger = t
 
 	if configuration.Sink != nil && configuration.Sink.Kind != "" {
@@ -90,23 +94,8 @@ func (t *rtspTrigger) Start(checkpoint functionconfig.Checkpoint) error {
 		t.Logger.InfoWith("Sink started", "kind", t.sink.GetKind())
 	}
 
-	// streaming processor - create the appropriate processor based on media type
-	if t.configuration.MediaType == "audio" {
-		t.mediaProcessor = NewAudioProcessor(
-			t.configuration.ChunkBytes,
-			t.configuration.MaxBytes,
-			t.configuration.TrimBytes,
-		)
-	} else if t.configuration.MediaType == "video" {
-		t.mediaProcessor = NewVideoProcessor(
-			t.configuration.ChunkBytes,
-			t.configuration.MaxBytes,
-			t.configuration.TrimBytes,
-		)
-	} else {
-		return errors.New("unsupported media type: " + t.configuration.MediaType)
-	}
-
+	// Create appropriate media processor based on media type
+	t.mediaProcessor = t.createMediaProcessor()
 	t.mediaProcessor.Start(time.Millisecond * time.Duration(t.configuration.ProcessingInterval))
 
 	u, err := base.ParseURL(t.configuration.RTSPURL)
@@ -133,15 +122,14 @@ func (t *rtspTrigger) Start(checkpoint functionconfig.Checkpoint) error {
 		return errors.Wrap(err, "setup all medias")
 	}
 
-	// setup media pipeline (LPCM depacketizers)
-	t.pipeline, err = NewMediaPipeline(t, desc.Medias)
-	if err != nil {
-		return errors.Wrap(err, "create media pipeline")
+	// Initialize media-specific pipeline and RTP processor
+	if err := t.setupMediaPipeline(desc.Medias); err != nil {
+		return err
 	}
 
-	// handle incoming RTP packets using depacketizer
+	// handle incoming RTP packets using polymorphic processor
 	t.client.OnPacketRTPAny(func(media *description.Media, forma format.Format, pkt *rtp.Packet) {
-		payload, err := t.pipeline.ProcessRTP(pkt, forma)
+		payload, err := t.mediaProcessor.ProcessRTP(pkt, forma)
 		if err != nil {
 			return
 		}
@@ -161,53 +149,94 @@ func (t *rtspTrigger) Start(checkpoint functionconfig.Checkpoint) error {
 	return nil
 }
 
-// dispatcher waits for processed chunks and sends them to workers
+// createMediaProcessor creates the appropriate media processor based on configuration
+func (t *rtspTrigger) createMediaProcessor() helpers.MediaProcessor {
+	switch t.configuration.MediaType {
+	case "audio":
+		return audio.NewAudioProcessor(
+			t.configuration.ChunkBytes,
+			t.configuration.MaxBytes,
+			t.configuration.TrimBytes,
+		)
+	case "video":
+		return video.NewVideoProcessor(
+			t.configuration.ChunkBytes,
+			t.configuration.MaxBytes,
+			t.configuration.TrimBytes,
+		)
+	default:
+		t.Logger.WarnWith("Unknown media type, defaulting to audio", "mediaType", t.configuration.MediaType)
+		return audio.NewAudioProcessor(
+			t.configuration.ChunkBytes,
+			t.configuration.MaxBytes,
+			t.configuration.TrimBytes,
+		)
+	}
+}
+
+// setupMediaPipeline initializes the media-specific pipeline
+// Uses polymorphism to handle both audio and video formats
+func (t *rtspTrigger) setupMediaPipeline(medias []*description.Media) error {
+	switch t.configuration.MediaType {
+	case "video":
+		vmp, err := video.NewVideoMediaPipeline(t.Logger, medias)
+		if err != nil {
+			return errors.Wrap(err, "create video media pipeline")
+		}
+		t.mediaProcessor.SetPipeline(vmp)
+	case "audio":
+		mp, err := helpers.NewMediaPipeline(medias)
+		if err != nil {
+			return errors.Wrap(err, "create media pipeline")
+		}
+		t.mediaProcessor.SetPipeline(mp)
+	default:
+		return errors.New("unsupported media type: " + t.configuration.MediaType)
+	}
+	return nil
+}
+
+// dispatcher waits for processed media chunks and sends them to workers
+// Uses polymorphism - the processor handles all audio/video specific logic
 func (t *rtspTrigger) dispatcher() {
 	defer t.wg.Done()
-	for {
-		select {
-		case <-t.stop:
-			t.Logger.Info("RTSP dispatcher stopping")
-			return
-		case ev := <-t.mediaProcessor.Output():
-			if ev == nil {
-				continue
-			}
+	for ev := range t.mediaProcessor.Output() {
+		if ev == nil {
+			continue
+		}
 
-			workerInstance, err := t.WorkerAllocator.Allocate(5 * time.Second)
-			if err != nil {
-				t.Logger.WarnWith("Worker allocation failed", "err", err)
-				continue
-			}
+		workerInstance, err := t.WorkerAllocator.Allocate(5 * time.Second)
+		if err != nil {
+			t.Logger.WarnWith("Worker allocation failed", "err", err)
+			continue
+		}
 
-			resp, err := t.SubmitEventToWorker(t.Logger, workerInstance, ev)
-			t.WorkerAllocator.Release(workerInstance)
-			if err != nil {
-				t.Logger.WarnWith("SubmitEventToWorker failed", "err", err)
-				continue
-			}
+		resp, err := t.SubmitEventToWorker(t.Logger, workerInstance, ev)
+		t.WorkerAllocator.Release(workerInstance)
+		if err != nil {
+			t.Logger.WarnWith("SubmitEventToWorker failed", "err", err)
+			continue
+		}
 
-			var responseData []byte
-			if typedResp, ok := resp.(nuclio.Response); ok {
-				responseData = typedResp.Body
-			}
+		var responseData []byte
+		if typedResp, ok := resp.(nuclio.Response); ok {
+			responseData = typedResp.Body
+		}
 
-			if t.sink != nil && len(responseData) > 0 {
-				metadata := map[string]any{
-					"timestamp": ev.timestamp,
-				}
-				if err := t.sink.Write(context.Background(), responseData, metadata); err != nil {
-					t.Logger.WarnWith("Failed to write to sink", "error", err)
-				}
+		if t.sink != nil && len(responseData) > 0 {
+			metadata := map[string]interface{}{
+				"timestamp": ev.Timestamp,
+			}
+			if err := t.sink.Write(context.Background(), responseData, metadata); err != nil {
+				t.Logger.WarnWith("Failed to write to sink", "error", err)
 			}
 		}
 	}
+	t.Logger.Info("RTSP dispatcher stopping")
 }
 
 // Stop closes RTSP client, stops processor and dispatcher
 func (t *rtspTrigger) Stop(force bool) (functionconfig.Checkpoint, error) {
-	close(t.stop)
-
 	if t.client != nil {
 		t.client.Close()
 	}
@@ -228,6 +257,6 @@ func (t *rtspTrigger) Stop(force bool) (functionconfig.Checkpoint, error) {
 	return nil, nil
 }
 
-func (t *rtspTrigger) GetConfig() map[string]any {
+func (t *rtspTrigger) GetConfig() map[string]interface{} {
 	return common.StructureToMap(t.configuration)
 }

@@ -4,7 +4,7 @@ SPDX-FileCopyrightText: © 2025 DSLab - Fondazione Bruno Kessler
 SPDX-License-Identifier: Apache-2.0
 */
 
-package rtsp
+package helpers
 
 import (
 	"strconv"
@@ -16,9 +16,9 @@ import (
 // Event wraps audio packet data from RTSP stream
 type Event struct {
 	nuclio.AbstractEvent
-	body       []byte
-	attributes map[string]interface{}
-	timestamp  time.Time
+	Body       []byte
+	Attributes map[string]interface{}
+	Timestamp  time.Time
 }
 
 // GetContentType returns the content type of the audio packet
@@ -28,12 +28,12 @@ func (e *Event) GetContentType() string {
 
 // GetBody returns the audio packet data
 func (e *Event) GetBody() []byte {
-	return e.body
+	return e.Body
 }
 
 // GetHeaderByteSlice returns a header value as a byte slice
 func (e *Event) GetHeaderByteSlice(key string) []byte {
-	if val, ok := e.attributes[key]; ok {
+	if val, ok := e.Attributes[key]; ok {
 		if strVal, ok := val.(string); ok {
 			return []byte(strVal)
 		}
@@ -43,15 +43,15 @@ func (e *Event) GetHeaderByteSlice(key string) []byte {
 
 // GetHeader returns a header value as an interface{}
 func (e *Event) GetHeader(key string) interface{} {
-	if e.attributes == nil {
+	if e.Attributes == nil {
 		return nil
 	}
-	return e.attributes[key]
+	return e.Attributes[key]
 }
 
 // GetHeaders returns all attributes as headers
 func (e *Event) GetHeaders() map[string]interface{} {
-	return e.attributes
+	return e.Attributes
 }
 
 // GetHeaderString returns a header value as a string
@@ -108,7 +108,7 @@ func (e *Event) GetFieldInt(key string) (int, error) {
 
 // GetFields returns all attributes
 func (e *Event) GetFields() map[string]interface{} {
-	return e.attributes
+	return e.Attributes
 }
 
 // GetField returns an attribute by key
@@ -118,5 +118,5 @@ func (e *Event) GetField(key string) interface{} {
 
 // GetTimestamp returns the packet timestamp
 func (e *Event) GetTimestamp() time.Time {
-	return e.timestamp
+	return e.Timestamp
 }

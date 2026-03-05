@@ -9,6 +9,8 @@ import (
 	"github.com/nuclio/nuclio/pkg/processor/runtime"
 	"github.com/nuclio/nuclio/pkg/processor/trigger"
 	"github.com/nuclio/nuclio/pkg/processor/worker"
+
+	"github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/trigger/rtsp/helpers"
 )
 
 type factory struct {
@@ -26,7 +28,7 @@ func (f *factory) Create(parentLogger logger.Logger,
 	triggerLogger := parentLogger.GetChild(triggerConfiguration.Kind)
 
 	// Parse RTSP configuration
-	configuration, err := NewConfiguration(id, triggerConfiguration, runtimeConfiguration)
+	configuration, err := helpers.NewConfiguration(id, triggerConfiguration, runtimeConfiguration)
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to parse RTSP trigger configuration")
 	}

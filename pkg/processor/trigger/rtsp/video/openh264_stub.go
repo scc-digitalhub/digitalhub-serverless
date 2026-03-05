@@ -1,7 +1,7 @@
 //go:build !openh264
 // +build !openh264
 
-package rtsp
+package video
 
 import "fmt"
 

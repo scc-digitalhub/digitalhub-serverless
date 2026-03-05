@@ -1,4 +1,4 @@
-package rtsp
+package helpers
 
 import (
 	"time"
@@ -28,19 +28,16 @@ type SinkConfiguration struct {
 type Configuration struct {
 	trigger.Configuration
 
-	RTSPURL            string             `mapstructure:"rtsp_url"`
-	BufferSize         int                `mapstructure:"buffer_size"`
-	ChunkBytes         int                `mapstructure:"chunk_bytes"`
-	MaxBytes           int                `mapstructure:"max_bytes"`
-	TrimBytes          int                `mapstructure:"trim_bytes"`
-	ProcessingInterval time.Duration      `mapstructure:"processing_interval"`
-	MediaType          string             `mapstructure:"media_type"` // "audio" or "video"
-	Output             map[string]any     `mapstructure:"output"`
-	Sink               *SinkConfiguration `mapstructure:"sink"`
-	// IsVideo            bool               `mapstructure:"is_video"`
+	RTSPURL            string        `mapstructure:"rtsp_url"`
+	BufferSize         int           `mapstructure:"buffer_size"`
+	ChunkBytes         int           `mapstructure:"chunk_bytes"`
+	MaxBytes           int           `mapstructure:"max_bytes"`
+	TrimBytes          int           `mapstructure:"trim_bytes"`
+	ProcessingInterval time.Duration `mapstructure:"processing_interval"`
+	MediaType          string        `mapstructure:"media_type"` // "audio" or "video"
+	// Output             map[string]any     `mapstructure:"output"`
+	Sink *SinkConfiguration `mapstructure:"sink"`
 }
-
-// media_type : audio / video
 
 func NewConfiguration(id string,
 	triggerConfiguration *functionconfig.Trigger,

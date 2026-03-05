@@ -1,7 +1,7 @@
 //go:build openh264
 // +build openh264
 
-package rtsp
+package video
 
 /*
 #cgo CFLAGS: -I/opt/homebrew/include -I/usr/local/include
