@@ -3,15 +3,16 @@ module github.com/scc-digitalhub/digitalhub-serverless
 go 1.25
 
 require (
-	github.com/bluenviron/gortsplib/v4 v4.13.0
+	github.com/bluenviron/gortsplib/v5 v5.2.2
 	github.com/envoyproxy/go-control-plane/envoy v1.35.0
-	github.com/gorilla/websocket v1.5.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/nuclio/errors v0.0.4
 	github.com/nuclio/logger v0.0.1
 	github.com/nuclio/nuclio v1.14.2
 	github.com/nuclio/nuclio-sdk-go v0.5.3
 	github.com/nuclio/zap v0.3.1
+	github.com/pion/rtp v1.9.0
 	github.com/stretchr/testify v1.11.1
 	github.com/v3io/version-go v0.0.2
 	google.golang.org/grpc v1.78.0
@@ -36,7 +37,7 @@ require (
 	github.com/aws/aws-sdk-go v1.45.2 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bluenviron/mediacommon/v2 v2.1.0 // indirect
+	github.com/bluenviron/mediacommon/v2 v2.6.0 // indirect
 	github.com/bodgit/plumbing v1.2.0 // indirect
 	github.com/bodgit/sevenzip v1.3.0 // indirect
 	github.com/bodgit/windows v1.0.0 // indirect
@@ -116,10 +117,12 @@ require (
 	github.com/nwaples/rardecode/v2 v2.0.0-beta.2 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.17 // indirect
+	github.com/pion/logging v0.2.4 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
-	github.com/pion/rtcp v1.2.15 // indirect
-	github.com/pion/rtp v1.8.13 // indirect
-	github.com/pion/sdp/v3 v3.0.11 // indirect
+	github.com/pion/rtcp v1.2.16 // indirect
+	github.com/pion/sdp/v3 v3.0.17 // indirect
+	github.com/pion/srtp/v3 v3.0.9 // indirect
+	github.com/pion/transport/v3 v3.1.1 // indirect
 	github.com/pjbgf/sha1cd v0.3.0 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
