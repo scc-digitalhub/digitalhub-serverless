@@ -8,12 +8,22 @@ Nuclio "Serverless"-based framework for Job/serverless executions compatible wit
 - functions as APIs in a Kubernetes cluster (based on Nuclio ``http`` trigger).
 - traffic processing tasks as extensions (``ext_proc``) to Envoy proxy as a service sidecar or standalone.
 
-## Job Trigger Configuration
+## Triggers
+
+- ``http`` - HTTP trigger
+- ``job`` - Job trigger
+- ``websocket`` - WebSocket trigger
+- ``extproc`` - Envoy proxy ExtProc trigger
+- ``openinference`` - Open Inference v2 protocol trigger
+- ``rtsp`` - RTSP trigger for audio (LPCM) and video content (MJPEG, H264)
+- ``mjpeg`` - MJPEG trigger
+
+### Job Trigger Configuration
 
 Trigger of type ``job`` extends the family of available triggers with the possibility to execute the container just ones with the predefined
 event defined in the trigger specification.  
 
-## Extproc Trigger Configuration
+### Extproc Trigger Configuration
 
 Trigger of type ``extproc`` extends the family of available triggers with the functionality to handle envoy extProc message processing. See the corresponding
 [Envoy Proxy Specification](https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ext_proc_filter) for details of the integration configuration.
@@ -64,28 +74,117 @@ where
 - ``logStream`` and ``logPhases`` define whether to log the processing information for debugging (false)
 - ``requestIdHeaderName`` the name of the request id header as defined by the Envoy proxy (x-request-id)
 - ``bufferStreamedBodies`` whether streamed body should be bufffered with ``perRequestBodyBufferBytes`` specifying the buffer size (false, 0)
+
 - ``decompressBodies`` whether to decompress body for processing (true)
 
-### Testing
+#### Testing
 
-To test the exproc functionality, it is possible to use the [Docker compose application](test/extproc/envoy-compose/docker-compose.yaml) including the Envoy proxy with the predefined [configuration](test/extproc/envoy-compose/envoy.yaml) and a simple upstream service. The Envoy configuration handles all the traffic with the 
+To test the extproc functionality, it is possible to use the [Docker compose application](test/extproc/envoy-compose/docker-compose.yaml) including the Envoy proxy with the predefined [configuration](test/extproc/envoy-compose/envoy.yaml) and a simple upstream service. The Envoy configuration handles all the traffic with the
 extproc gRPC server outside of the compose (``host.docker.internal``, port 5051).
 
-To run / debug the extproc processor, it is possible to run the predefined script: [test/extproc/run.sh](test/extproc/run.sh). The application
-relies on a Python runtime and therefore expects a preconfigured Python runtime with the Nuclio python SDK installed.
+To run / debug the extproc processor, run the predefined script: [test/extproc/run.sh](test/extproc/run.sh). The application relies on a Python runtime and therefore expects a preconfigured Python runtime with the Nuclio python SDK installed.
 
 Once you have the docker container and the application running, you can test it with the following curl command:
 ```bash
 curl localhost:8080/resource -X POST -H 'Content-type: text/plain' -d 'hello' -s -vvv
 ```
 
-## OpenInference Trigger Configuration
+### HTTP Trigger Configuration
+
+Trigger of type `http` exposes REST endpoints and is the most common way to serve APIs and lightweight inference endpoints.
+
+Configuration example:
+
+```yaml
+triggers:
+  myhttp:
+    kind: http
+    attributes:
+      port: 8080
+    maxWorkers: 4
+```
+
+Handler function:
+
+```python
+def handler(context, event):
+    # event.body contains request body
+    return context.Response(body='ok', status_code=200)
+```
+
+Testing:
+
+```bash
+curl http://localhost:8080/ -X POST -d 'hello'
+```
+
+### WebSocket Trigger Configuration
+
+Trigger of type `websocket` accepts websocket connections and forwards messages to the function handler. Useful for real-time bidirectional communication (streams, control channels).
+
+Configuration example:
+
+```yaml
+triggers:
+  myws:
+    kind: websocket
+    attributes:
+      port: 8080
+    maxWorkers: 4
+```
+
+Handler behavior:
+
+- On connection the handler may receive connection events
+- Received messages are delivered as events to the handler
+- Handler can return responses which are sent back to the client
+
+Example handler (simplified):
+
+```python
+def handler(context, event):
+    msg = event.body.decode('utf-8')
+    # echo
+    return context.Response(body=msg, status_code=200)
+```
+
+Testing (ws client):
+
+```bash
+websocat ws://localhost:8080/
+```
+
+### RTSP Trigger Configuration
+
+Trigger of type `rtsp` enables receiving and streaming media over RTSP, commonly used for camera feeds and audio streams. It integrates with sinks to re-stream or forward processed media.
+
+Configuration example:
+
+```yaml
+triggers:
+  myrtsp:
+    kind: rtsp
+    attributes:
+      url: "rtsp://camera.local:8554/stream"
+    maxWorkers: 4
+```
+
+Event structure: frames or audio packets depending on stream type. Handler receives binary payloads with metadata fields such as `timestamp` and `frame_num`.
+
+Testing:
+
+```bash
+# Start processor and connect a client (e.g. ffplay)
+ffplay rtsp://localhost:8554/stream
+```
+
+### OpenInference Trigger Configuration
 
 Trigger of type ``openinference`` extends the family of available triggers with the functionality to serve machine learning models using the [OpenInference protocol](https://github.com/openmodelio/openinference). This trigger provides standardized REST and gRPC endpoints compatible with inference serving frameworks like NVIDIA Triton, KServe, and other OpenInference-compliant systems.
 
 The trigger exposes the following endpoints:
 
-### REST Endpoints (HTTP/JSON)
+#### REST Endpoints (HTTP/JSON)
 
 - `GET /v2/health/live` - Server liveness check
 - `GET /v2/health/ready` - Server readiness check
@@ -93,7 +192,7 @@ The trigger exposes the following endpoints:
 - `GET /v2/models/{model_name}/versions/{version}` - Model metadata (inputs/outputs schema)
 - `POST /v2/models/{model_name}/versions/{version}/infer` - Perform inference
 
-### gRPC Endpoints
+#### gRPC Endpoints
 
 The trigger implements the `GRPCInferenceService` from the OpenInference protocol specification:
 
@@ -104,7 +203,7 @@ The trigger implements the `GRPCInferenceService` from the OpenInference protoco
 - `ModelMetadata` - Model metadata with tensor definitions
 - `ModelInfer` - Perform inference
 
-### Configuration
+#### Configuration
 
 The trigger configuration is defined as follows:
 
@@ -178,7 +277,7 @@ def handler(context, event):
     )
 ```
 
-### Testing
+#### Testing
 
 To test the OpenInference trigger functionality, use the test suite in the [test/openinference/](test/openinference/) directory. The test suite includes:
 
@@ -223,7 +322,7 @@ curl -X POST http://localhost:8080/v2/models/test-model/versions/1.0/infer \
   }'
 ```
 
-## MJPEG Trigger Configuration
+### MJPEG Trigger Configuration
 
 Trigger of type ``mjpeg`` enables processing of frames from Motion JPEG (MJPEG) video streams in real-time. MJPEG is a video compression format where each frame is individually compressed as a JPEG image and is commonly used in IP cameras, webcams, and video surveillance systems.
 
@@ -265,7 +364,7 @@ triggers:
   - Must be >= 1
 - `sink` - Optional sink configuration for output streaming (see Sink documentation)
 
-### Event Structure
+#### Event Structure
 
 When a frame is processed, the handler receives an event with:
 
@@ -276,7 +375,7 @@ When a frame is processed, the handler receives an event with:
   - `url`: The source MJPEG stream URL
   - `timestamp`: Frame capture timestamp
 
-### Handler Function
+#### Handler Function
 
 Example Python handler for processing MJPEG frames:
 
@@ -334,7 +433,7 @@ def handler(context, event):
     )
 ```
 
-### Behavior
+#### Behavior
 
 **Stream Connection:**
 - The trigger automatically connects to the MJPEG stream on start
@@ -352,7 +451,7 @@ def handler(context, event):
 - Frame parsing errors are logged but don't stop the stream
 - Worker allocation failures are logged (event is dropped)
 
-### Sink Integration
+## Sink Integration
 
 The MJPEG trigger supports optional sink configuration for outputting processed frames. Available sinks include:
 
