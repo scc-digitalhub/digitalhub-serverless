@@ -12,7 +12,6 @@ import (
 )
 
 const (
-	DefaultBufferSize         = 4096
 	DefaultChunkBytes         = 160000
 	DefaultMaxBytes           = 1440000
 	DefaultTrimBytes          = 1120000
@@ -23,7 +22,6 @@ const (
 type Configuration struct {
 	trigger.Configuration
 	WebSocketAddr      string        `mapstructure:"websocket_addr"`
-	BufferSize         int           `mapstructure:"buffer_size"`
 	ChunkBytes         int           `mapstructure:"chunk_bytes"`
 	MaxBytes           int           `mapstructure:"max_bytes"`
 	TrimBytes          int           `mapstructure:"trim_bytes"`
@@ -37,7 +35,6 @@ func NewConfiguration(id string,
 
 	newConfiguration := Configuration{
 		WebSocketAddr:      "",
-		BufferSize:         DefaultBufferSize,
 		ChunkBytes:         DefaultChunkBytes,
 		MaxBytes:           DefaultMaxBytes,
 		TrimBytes:          DefaultTrimBytes,

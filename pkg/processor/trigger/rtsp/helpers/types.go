@@ -11,7 +11,6 @@ import (
 )
 
 const (
-	DefaultBufferSize         = 4096
 	DefaultChunkBytes         = 16000
 	DefaultMaxBytes           = 1440000
 	DefaultTrimBytes          = 1120000
@@ -29,7 +28,6 @@ type Configuration struct {
 	trigger.Configuration
 
 	RTSPURL            string        `mapstructure:"rtsp_url"`
-	BufferSize         int           `mapstructure:"buffer_size"`
 	ChunkBytes         int           `mapstructure:"chunk_bytes"`
 	MaxBytes           int           `mapstructure:"max_bytes"`
 	TrimBytes          int           `mapstructure:"trim_bytes"`
@@ -46,7 +44,6 @@ func NewConfiguration(id string,
 	// Defaults
 	newConfiguration := Configuration{
 		RTSPURL:            "",
-		BufferSize:         DefaultBufferSize,
 		ChunkBytes:         DefaultChunkBytes,
 		MaxBytes:           DefaultMaxBytes,
 		TrimBytes:          DefaultTrimBytes,

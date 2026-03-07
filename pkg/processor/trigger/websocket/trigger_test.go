@@ -309,7 +309,6 @@ func (suite *WebsocketTriggerTestSuite) TestConfigurationDefaults() {
 	config := wsTrigger.configuration
 
 	// Check defaults are applied
-	suite.Equal(DefaultBufferSize, config.BufferSize)
 	suite.Equal(DefaultChunkBytes, config.ChunkBytes)
 	suite.Equal(DefaultMaxBytes, config.MaxBytes)
 	suite.Equal(DefaultTrimBytes, config.TrimBytes)
@@ -531,7 +530,6 @@ func (suite *WebsocketTriggerTestSuite) TestGetConfig() {
 
 	suite.NotNil(config)
 	suite.Equal(":8080", config["WebSocketAddr"])
-	suite.Equal(float64(8192), config["BufferSize"])
 }
 
 func TestWebsocketTriggerTestSuite(t *testing.T) {

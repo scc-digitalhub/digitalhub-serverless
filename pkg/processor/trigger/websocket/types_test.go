@@ -55,7 +55,6 @@ func (suite *WebsocketTypesTestSuite) TestNewConfigurationValid() {
 
 	// Verify configuration values
 	suite.Equal(":8080", config.WebSocketAddr)
-	suite.Equal(8192, config.BufferSize)
 	suite.Equal(320000, config.ChunkBytes)
 	suite.Equal(2880000, config.MaxBytes)
 	suite.Equal(2240000, config.TrimBytes)
@@ -88,7 +87,6 @@ func (suite *WebsocketTypesTestSuite) TestNewConfigurationDefaults() {
 	suite.NotNil(config)
 
 	// Verify defaults are applied
-	suite.Equal(DefaultBufferSize, config.BufferSize)
 	suite.Equal(DefaultChunkBytes, config.ChunkBytes)
 	suite.Equal(DefaultMaxBytes, config.MaxBytes)
 	suite.Equal(DefaultTrimBytes, config.TrimBytes)
