@@ -29,7 +29,6 @@ func (suite *WebsocketTypesTestSuite) TestNewConfigurationValid() {
 		Name: "test-websocket",
 		Attributes: map[string]interface{}{
 			"websocket_addr":      ":8080",
-			"buffer_size":         8192,
 			"chunk_bytes":         320000,
 			"max_bytes":           2880000,
 			"trim_bytes":          2240000,
@@ -96,11 +95,9 @@ func (suite *WebsocketTypesTestSuite) TestNewConfigurationDefaults() {
 
 func (suite *WebsocketTypesTestSuite) TestNewConfigurationMissingWebSocketAddr() {
 	triggerConfig := &functionconfig.Trigger{
-		Kind: "websocket",
-		Name: "test-websocket",
-		Attributes: map[string]interface{}{
-			"buffer_size": 8192,
-		},
+		Kind:       "websocket",
+		Name:       "test-websocket",
+		Attributes: map[string]interface{}{},
 	}
 
 	runtimeConfig := &runtime.Configuration{
@@ -126,7 +123,8 @@ func (suite *WebsocketTypesTestSuite) TestNewConfigurationInvalidAttributes() {
 		Name: "test-websocket",
 		Attributes: map[string]interface{}{
 			"websocket_addr": ":8080",
-			"buffer_size":    "invalid", // Should be int
+			// invalid type for chunk_bytes (should be int)
+			"chunk_bytes": "invalid-int",
 		},
 	}
 
@@ -152,7 +150,8 @@ func (suite *WebsocketTypesTestSuite) TestNewConfigurationMapstructureDecodeErro
 		Name: "test-websocket",
 		Attributes: map[string]interface{}{
 			"websocket_addr": ":8080",
-			"buffer_size":    "invalid_string", // This should cause mapstructure to fail
+			// invalid type for processing_interval to force decode error
+			"processing_interval": "not-a-number",
 		},
 	}
 
@@ -198,7 +197,6 @@ func (suite *WebsocketTypesTestSuite) TestConfigurationValidation() {
 			name: "large buffer size",
 			attributes: map[string]interface{}{
 				"websocket_addr": ":8080",
-				"buffer_size":    1048576, // 1MB
 			},
 			expectError: false,
 		},

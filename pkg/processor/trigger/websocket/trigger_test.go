@@ -188,7 +188,6 @@ func (suite *WebsocketTriggerTestSuite) TestTriggerCreation() {
 				WorkerAllocatorName: "mock-allocator",
 				Attributes: map[string]interface{}{
 					"websocket_addr":      ":8080",
-					"buffer_size":         4096,
 					"processing_interval": 2000,
 					"is_stream":           false,
 				},
@@ -239,7 +238,6 @@ func (suite *WebsocketTriggerTestSuite) TestTriggerCreation() {
 				Name:                "test-websocket",
 				WorkerAllocatorName: "mock-allocator",
 				Attributes: map[string]interface{}{
-					"buffer_size":         4096,
 					"processing_interval": 2000,
 					"is_stream":           false,
 				},
@@ -506,7 +504,6 @@ func (suite *WebsocketTriggerTestSuite) TestGetConfig() {
 		WorkerAllocatorName: "mock-allocator",
 		Attributes: map[string]interface{}{
 			"websocket_addr": ":8080",
-			"buffer_size":    8192,
 		},
 	}
 

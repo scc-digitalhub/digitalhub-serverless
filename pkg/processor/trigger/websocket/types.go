@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"reflect"
 	"time"
 
 	"github.com/nuclio/nuclio/pkg/functionconfig"
@@ -46,9 +47,40 @@ func NewConfiguration(id string,
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to create trigger configuration")
 	}
+	if baseConfiguration == nil {
+		return nil, errors.New("failed to create base trigger configuration")
+	}
 	newConfiguration.Configuration = *baseConfiguration
 
-	if err := mapstructure.Decode(triggerConfiguration.Attributes, &newConfiguration); err != nil {
+	// Use a strict decoder to surface unused/invalid attributes and handle
+	// numeric -> time.Duration conversion
+	decoderConfig := &mapstructure.DecoderConfig{
+		ErrorUnused: true,
+		DecodeHook: mapstructure.ComposeDecodeHookFunc(
+			func(f reflect.Type, t reflect.Type, data any) (any, error) {
+				// Convert numeric types to time.Duration when target is time.Duration
+				if t == reflect.TypeOf(time.Duration(0)) {
+					switch v := data.(type) {
+					case int:
+						return time.Duration(v), nil
+					case int64:
+						return time.Duration(v), nil
+					case float64:
+						return time.Duration(int64(v)), nil
+					}
+				}
+				return data, nil
+			},
+		),
+		Result: &newConfiguration,
+	}
+
+	decoder, derr := mapstructure.NewDecoder(decoderConfig)
+	if derr != nil {
+		return nil, errors.Wrap(derr, "Failed to create mapstructure decoder for Websocket trigger attributes")
+	}
+
+	if err := decoder.Decode(triggerConfiguration.Attributes); err != nil {
 		return nil, errors.Wrap(err, "Failed to decode Websocket trigger attributes")
 	}
 
