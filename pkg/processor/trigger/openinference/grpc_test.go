@@ -112,7 +112,7 @@ func TestConvertTensorContentsWithContents(t *testing.T) {
 		contents := &pb.InferTensorContents{
 			BoolContents: []bool{true, false, true},
 		}
-		result := server.convertTensorContents(contents, nil, 0, "BOOL")
+		result := server.convertTensorContents(contents, nil, 0, "BOOL", []int64{1, 3})
 		assert.Equal(t, []bool{true, false, true}, result)
 	})
 
@@ -120,7 +120,7 @@ func TestConvertTensorContentsWithContents(t *testing.T) {
 		contents := &pb.InferTensorContents{
 			IntContents: []int32{1, 2, 3, 4},
 		}
-		result := server.convertTensorContents(contents, nil, 0, "INT32")
+		result := server.convertTensorContents(contents, nil, 0, "INT32", []int64{1, 4})
 		assert.Equal(t, []int32{1, 2, 3, 4}, result)
 	})
 
@@ -128,7 +128,7 @@ func TestConvertTensorContentsWithContents(t *testing.T) {
 		contents := &pb.InferTensorContents{
 			Int64Contents: []int64{100, 200, 300},
 		}
-		result := server.convertTensorContents(contents, nil, 0, "INT64")
+		result := server.convertTensorContents(contents, nil, 0, "INT64", []int64{1, 3})
 		assert.Equal(t, []int64{100, 200, 300}, result)
 	})
 
@@ -136,7 +136,7 @@ func TestConvertTensorContentsWithContents(t *testing.T) {
 		contents := &pb.InferTensorContents{
 			UintContents: []uint32{10, 20, 30},
 		}
-		result := server.convertTensorContents(contents, nil, 0, "UINT32")
+		result := server.convertTensorContents(contents, nil, 0, "UINT32", []int64{1, 3})
 		assert.Equal(t, []uint32{10, 20, 30}, result)
 	})
 
@@ -144,7 +144,7 @@ func TestConvertTensorContentsWithContents(t *testing.T) {
 		contents := &pb.InferTensorContents{
 			Uint64Contents: []uint64{1000, 2000, 3000},
 		}
-		result := server.convertTensorContents(contents, nil, 0, "UINT64")
+		result := server.convertTensorContents(contents, nil, 0, "UINT64", []int64{1, 3})
 		assert.Equal(t, []uint64{1000, 2000, 3000}, result)
 	})
 
@@ -152,7 +152,7 @@ func TestConvertTensorContentsWithContents(t *testing.T) {
 		contents := &pb.InferTensorContents{
 			Fp32Contents: []float32{1.5, 2.5, 3.5},
 		}
-		result := server.convertTensorContents(contents, nil, 0, "FP32")
+		result := server.convertTensorContents(contents, nil, 0, "FP32", []int64{1, 3})
 		assert.Equal(t, []float32{1.5, 2.5, 3.5}, result)
 	})
 
@@ -160,7 +160,7 @@ func TestConvertTensorContentsWithContents(t *testing.T) {
 		contents := &pb.InferTensorContents{
 			Fp64Contents: []float64{1.123, 2.456, 3.789},
 		}
-		result := server.convertTensorContents(contents, nil, 0, "FP64")
+		result := server.convertTensorContents(contents, nil, 0, "FP64", []int64{1, 3})
 		assert.Equal(t, []float64{1.123, 2.456, 3.789}, result)
 	})
 
@@ -168,7 +168,7 @@ func TestConvertTensorContentsWithContents(t *testing.T) {
 		contents := &pb.InferTensorContents{
 			BytesContents: [][]byte{[]byte("hello"), []byte("world")},
 		}
-		result := server.convertTensorContents(contents, nil, 0, "BYTES")
+		result := server.convertTensorContents(contents, nil, 0, "BYTES", []int64{1, 2})
 		assert.Equal(t, [][]byte{[]byte("hello"), []byte("world")}, result)
 	})
 }
@@ -180,7 +180,7 @@ func TestConvertTensorContentsWithRawContents(t *testing.T) {
 	t.Run("BOOL", func(t *testing.T) {
 		rawData := []byte{1, 0, 1}
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "BOOL")
+		result := server.convertTensorContents(nil, rawInputContents, 0, "BOOL", []int64{1, 3})
 		assert.Equal(t, []bool{true, false, true}, result)
 	})
 
@@ -190,7 +190,7 @@ func TestConvertTensorContentsWithRawContents(t *testing.T) {
 		rawData[1] = 254 // -2 as uint8
 		rawData[2] = 3
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "INT8")
+		result := server.convertTensorContents(nil, rawInputContents, 0, "INT8", []int64{1, 3})
 		expected := []int{1, -2, 3}
 		assert.Equal(t, expected, result)
 	})
@@ -198,7 +198,7 @@ func TestConvertTensorContentsWithRawContents(t *testing.T) {
 	t.Run("UINT8", func(t *testing.T) {
 		rawData := []byte{10, 20, 30}
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "UINT8")
+		result := server.convertTensorContents(nil, rawInputContents, 0, "UINT8", []int64{1, 3})
 		expected := []int{10, 20, 30}
 		assert.Equal(t, expected, result)
 	})
@@ -210,7 +210,7 @@ func TestConvertTensorContentsWithRawContents(t *testing.T) {
 			binary.LittleEndian.PutUint16(rawData[i*2:i*2+2], uint16(v))
 		}
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "INT16")
+		result := server.convertTensorContents(nil, rawInputContents, 0, "INT16", []int64{1, 3})
 		assert.Equal(t, []int16{100, -200, 300}, result)
 	})
 
@@ -220,7 +220,7 @@ func TestConvertTensorContentsWithRawContents(t *testing.T) {
 		binary.LittleEndian.PutUint16(rawData[2:4], 200)
 		binary.LittleEndian.PutUint16(rawData[4:6], 300)
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "UINT16")
+		result := server.convertTensorContents(nil, rawInputContents, 0, "UINT16", []int64{1, 3})
 		assert.Equal(t, []uint16{100, 200, 300}, result)
 	})
 
@@ -231,7 +231,7 @@ func TestConvertTensorContentsWithRawContents(t *testing.T) {
 			binary.LittleEndian.PutUint32(rawData[i*4:i*4+4], uint32(v))
 		}
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "INT32")
+		result := server.convertTensorContents(nil, rawInputContents, 0, "INT32", []int64{1, 3})
 		assert.Equal(t, []int32{1000, -2000, 3000}, result)
 	})
 
@@ -241,7 +241,7 @@ func TestConvertTensorContentsWithRawContents(t *testing.T) {
 		binary.LittleEndian.PutUint32(rawData[4:8], 2000)
 		binary.LittleEndian.PutUint32(rawData[8:12], 3000)
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "UINT32")
+		result := server.convertTensorContents(nil, rawInputContents, 0, "UINT32", []int64{1, 3})
 		assert.Equal(t, []uint32{1000, 2000, 3000}, result)
 	})
 
@@ -252,7 +252,7 @@ func TestConvertTensorContentsWithRawContents(t *testing.T) {
 			binary.LittleEndian.PutUint64(rawData[i*8:i*8+8], uint64(v))
 		}
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "INT64")
+		result := server.convertTensorContents(nil, rawInputContents, 0, "INT64", []int64{1, 3})
 		assert.Equal(t, []int64{10000, -20000, 30000}, result)
 	})
 
@@ -262,7 +262,7 @@ func TestConvertTensorContentsWithRawContents(t *testing.T) {
 		binary.LittleEndian.PutUint64(rawData[8:16], 20000)
 		binary.LittleEndian.PutUint64(rawData[16:24], 30000)
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "UINT64")
+		result := server.convertTensorContents(nil, rawInputContents, 0, "UINT64", []int64{1, 3})
 		assert.Equal(t, []uint64{10000, 20000, 30000}, result)
 	})
 
@@ -272,7 +272,7 @@ func TestConvertTensorContentsWithRawContents(t *testing.T) {
 		binary.LittleEndian.PutUint32(rawData[4:8], math.Float32bits(2.5))
 		binary.LittleEndian.PutUint32(rawData[8:12], math.Float32bits(3.5))
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "FP32")
+		result := server.convertTensorContents(nil, rawInputContents, 0, "FP32", []int64{1, 3})
 		assert.Equal(t, []float32{1.5, 2.5, 3.5}, result)
 	})
 
@@ -282,25 +282,25 @@ func TestConvertTensorContentsWithRawContents(t *testing.T) {
 		binary.LittleEndian.PutUint64(rawData[8:16], math.Float64bits(2.456))
 		binary.LittleEndian.PutUint64(rawData[16:24], math.Float64bits(3.789))
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "FP64")
+		result := server.convertTensorContents(nil, rawInputContents, 0, "FP64", []int64{1, 3})
 		assert.Equal(t, []float64{1.123, 2.456, 3.789}, result)
 	})
 
 	t.Run("BYTES", func(t *testing.T) {
 		rawData := []byte("hello world")
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "BYTES")
-		assert.Equal(t, "hello world", result)
+		result := server.convertTensorContents(nil, rawInputContents, 0, "BYTES", []int64{1, 11})
+		assert.Equal(t, [][]byte{[]byte("hello world")}, result)
 	})
 
 	t.Run("NilContents", func(t *testing.T) {
-		result := server.convertTensorContents(nil, nil, 0, "FP32")
+		result := server.convertTensorContents(nil, nil, 0, "FP32", []int64{1, 3})
 		assert.Nil(t, result)
 	})
 
 	t.Run("IndexOutOfRange", func(t *testing.T) {
 		rawInputContents := [][]byte{[]byte{1, 2, 3}}
-		result := server.convertTensorContents(nil, rawInputContents, 5, "INT8")
+		result := server.convertTensorContents(nil, rawInputContents, 5, "INT8", []int64{1, 3})
 		assert.Nil(t, result)
 	})
 }
@@ -415,7 +415,7 @@ func TestConvertDataToTensorContents(t *testing.T) {
 func TestBytesToTensor(t *testing.T) {
 	t.Run("BOOL", func(t *testing.T) {
 		data := []byte{1, 0, 1}
-		result, err := BytesToTensor("BOOL", data)
+		result, err := BytesToTensor("BOOL", data, []int64{1, 3})
 		assert.NoError(t, err)
 		assert.Equal(t, []bool{true, false, true}, result)
 	})
@@ -425,14 +425,14 @@ func TestBytesToTensor(t *testing.T) {
 		data[0] = 10
 		data[1] = 236 // -20 as uint8
 		data[2] = 30
-		result, err := BytesToTensor("INT8", data)
+		result, err := BytesToTensor("INT8", data, []int64{1, 3})
 		assert.NoError(t, err)
 		assert.Equal(t, []int{10, -20, 30}, result)
 	})
 
 	t.Run("UINT8", func(t *testing.T) {
 		data := []byte{10, 20, 30}
-		result, err := BytesToTensor("UINT8", data)
+		result, err := BytesToTensor("UINT8", data, []int64{1, 3})
 		assert.NoError(t, err)
 		assert.Equal(t, []int{10, 20, 30}, result)
 	})
@@ -443,14 +443,14 @@ func TestBytesToTensor(t *testing.T) {
 		for i, v := range vals {
 			binary.LittleEndian.PutUint16(data[i*2:i*2+2], uint16(v))
 		}
-		result, err := BytesToTensor("INT16", data)
+		result, err := BytesToTensor("INT16", data, []int64{1, 3})
 		assert.NoError(t, err)
 		assert.Equal(t, []int16{100, -200, 300}, result)
 	})
 
 	t.Run("INT16_InvalidLength", func(t *testing.T) {
 		data := []byte{1, 2, 3} // Not a multiple of 2
-		_, err := BytesToTensor("INT16", data)
+		_, err := BytesToTensor("INT16", data, []int64{1, 3})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not a multiple of 2")
 	})
@@ -460,7 +460,7 @@ func TestBytesToTensor(t *testing.T) {
 		binary.LittleEndian.PutUint16(data[0:2], 100)
 		binary.LittleEndian.PutUint16(data[2:4], 200)
 		binary.LittleEndian.PutUint16(data[4:6], 300)
-		result, err := BytesToTensor("UINT16", data)
+		result, err := BytesToTensor("UINT16", data, []int64{1, 3})
 		assert.NoError(t, err)
 		assert.Equal(t, []uint16{100, 200, 300}, result)
 	})
@@ -471,14 +471,14 @@ func TestBytesToTensor(t *testing.T) {
 		for i, v := range vals {
 			binary.LittleEndian.PutUint32(data[i*4:i*4+4], uint32(v))
 		}
-		result, err := BytesToTensor("INT32", data)
+		result, err := BytesToTensor("INT32", data, []int64{1, 3})
 		assert.NoError(t, err)
 		assert.Equal(t, []int32{1000, -2000, 3000}, result)
 	})
 
 	t.Run("INT32_InvalidLength", func(t *testing.T) {
 		data := []byte{1, 2, 3} // Not a multiple of 4
-		_, err := BytesToTensor("INT32", data)
+		_, err := BytesToTensor("INT32", data, []int64{1, 3})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not a multiple of 4")
 	})
@@ -488,7 +488,7 @@ func TestBytesToTensor(t *testing.T) {
 		binary.LittleEndian.PutUint32(data[0:4], 1000)
 		binary.LittleEndian.PutUint32(data[4:8], 2000)
 		binary.LittleEndian.PutUint32(data[8:12], 3000)
-		result, err := BytesToTensor("UINT32", data)
+		result, err := BytesToTensor("UINT32", data, []int64{1, 3})
 		assert.NoError(t, err)
 		assert.Equal(t, []uint32{1000, 2000, 3000}, result)
 	})
@@ -499,14 +499,14 @@ func TestBytesToTensor(t *testing.T) {
 		for i, v := range vals {
 			binary.LittleEndian.PutUint64(data[i*8:i*8+8], uint64(v))
 		}
-		result, err := BytesToTensor("INT64", data)
+		result, err := BytesToTensor("INT64", data, []int64{1, 3})
 		assert.NoError(t, err)
 		assert.Equal(t, []int64{10000, -20000, 30000}, result)
 	})
 
 	t.Run("INT64_InvalidLength", func(t *testing.T) {
 		data := []byte{1, 2, 3, 4, 5} // Not a multiple of 8
-		_, err := BytesToTensor("INT64", data)
+		_, err := BytesToTensor("INT64", data, []int64{1, 3})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not a multiple of 8")
 	})
@@ -516,7 +516,7 @@ func TestBytesToTensor(t *testing.T) {
 		binary.LittleEndian.PutUint64(data[0:8], 10000)
 		binary.LittleEndian.PutUint64(data[8:16], 20000)
 		binary.LittleEndian.PutUint64(data[16:24], 30000)
-		result, err := BytesToTensor("UINT64", data)
+		result, err := BytesToTensor("UINT64", data, []int64{1, 3})
 		assert.NoError(t, err)
 		assert.Equal(t, []uint64{10000, 20000, 30000}, result)
 	})
@@ -526,14 +526,14 @@ func TestBytesToTensor(t *testing.T) {
 		binary.LittleEndian.PutUint32(data[0:4], math.Float32bits(1.5))
 		binary.LittleEndian.PutUint32(data[4:8], math.Float32bits(2.5))
 		binary.LittleEndian.PutUint32(data[8:12], math.Float32bits(3.5))
-		result, err := BytesToTensor("FP32", data)
+		result, err := BytesToTensor("FP32", data, []int64{1, 3})
 		assert.NoError(t, err)
 		assert.Equal(t, []float32{1.5, 2.5, 3.5}, result)
 	})
 
 	t.Run("FP32_InvalidLength", func(t *testing.T) {
 		data := []byte{1, 2, 3} // Not a multiple of 4
-		_, err := BytesToTensor("FP32", data)
+		_, err := BytesToTensor("FP32", data, []int64{1, 3})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not a multiple of 4")
 	})
@@ -543,23 +543,23 @@ func TestBytesToTensor(t *testing.T) {
 		binary.LittleEndian.PutUint64(data[0:8], math.Float64bits(1.123))
 		binary.LittleEndian.PutUint64(data[8:16], math.Float64bits(2.456))
 		binary.LittleEndian.PutUint64(data[16:24], math.Float64bits(3.789))
-		result, err := BytesToTensor("FP64", data)
+		result, err := BytesToTensor("FP64", data, []int64{1, 3})
 		assert.NoError(t, err)
 		assert.Equal(t, []float64{1.123, 2.456, 3.789}, result)
 	})
 
 	t.Run("FP64_InvalidLength", func(t *testing.T) {
 		data := []byte{1, 2, 3, 4, 5} // Not a multiple of 8
-		_, err := BytesToTensor("FP64", data)
+		_, err := BytesToTensor("FP64", data, []int64{1, 3})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not a multiple of 8")
 	})
 
 	t.Run("BYTES", func(t *testing.T) {
 		data := []byte("hello world")
-		result, err := BytesToTensor("BYTES", data)
+		result, err := BytesToTensor("BYTES", data, []int64{1, 11})
 		assert.NoError(t, err)
-		assert.Equal(t, "hello world", result)
+		assert.Equal(t, [][]byte{[]byte("hello world")}, result)
 	})
 
 	t.Run("FP16", func(t *testing.T) {
@@ -571,7 +571,7 @@ func TestBytesToTensor(t *testing.T) {
 		binary.LittleEndian.PutUint16(data[0:2], 0x3C00)
 		binary.LittleEndian.PutUint16(data[2:4], 0x4000)
 		binary.LittleEndian.PutUint16(data[4:6], 0x4200)
-		result, err := BytesToTensor("FP16", data)
+		result, err := BytesToTensor("FP16", data, []int64{1, 3})
 		assert.NoError(t, err)
 		floatResult, ok := result.([]float32)
 		assert.True(t, ok)
@@ -583,21 +583,21 @@ func TestBytesToTensor(t *testing.T) {
 
 	t.Run("FP16_InvalidLength", func(t *testing.T) {
 		data := []byte{1, 2, 3} // Not a multiple of 2
-		_, err := BytesToTensor("FP16", data)
+		_, err := BytesToTensor("FP16", data, []int64{1, 3})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not a multiple of 2")
 	})
 
 	t.Run("UnsupportedDataType", func(t *testing.T) {
 		data := []byte{1, 2, 3, 4}
-		_, err := BytesToTensor("INVALID_TYPE", data)
+		_, err := BytesToTensor("INVALID_TYPE", data, []int64{1, 4})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "unsupported data type")
 	})
 
 	t.Run("CaseInsensitive", func(t *testing.T) {
 		data := []byte{1, 0, 1}
-		result, err := BytesToTensor("bool", data) // lowercase
+		result, err := BytesToTensor("bool", data, []int64{1, 3}) // lowercase
 		assert.NoError(t, err)
 		assert.Equal(t, []bool{true, false, true}, result)
 	})

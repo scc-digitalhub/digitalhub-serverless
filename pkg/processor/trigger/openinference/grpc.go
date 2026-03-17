@@ -12,7 +12,6 @@ package openinference
 import (
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
@@ -111,7 +110,7 @@ func (s *grpcInferenceServer) ModelInfer(ctx context.Context, req *pb.ModelInfer
 	restRequest := s.convertGRPCToRESTRequest(req)
 
 	// Marshal to JSON for the event body
-	body, err := json.Marshal(restRequest)
+	body, err := Serialize(restRequest)
 	if err != nil {
 		s.trigger.Logger.WarnWith("Failed to marshal request", "error", err)
 		return nil, err
@@ -153,13 +152,13 @@ func (s *grpcInferenceServer) ModelInfer(ctx context.Context, req *pb.ModelInfer
 	switch typedResponse := response.(type) {
 	case nuclio.Response:
 		// Parse the response body
-		var restResponse RESTInferenceResponse
-		if err := json.Unmarshal(typedResponse.Body, &restResponse); err != nil {
+		restResponse, err := Deserialize(typedResponse.Body)
+		if err != nil {
 			s.trigger.Logger.WarnWith("Failed to parse function response", "error", err)
 			return nil, err
 		}
 
-		return s.convertRESTToGRPCResponse(&restResponse, req.Id), nil
+		return s.convertRESTToGRPCResponse(restResponse, req.Id), nil
 
 	default:
 		s.trigger.Logger.WarnWith("Unexpected response type", "type", typedResponse)
@@ -210,7 +209,7 @@ func (s *grpcInferenceServer) convertGRPCToRESTRequest(req *pb.ModelInferRequest
 			Shape:      input.Shape,
 			Datatype:   input.Datatype,
 			Parameters: make(map[string]any),
-			Data:       s.convertTensorContents(input.Contents, req.RawInputContents, i, input.Datatype),
+			Data:       s.convertTensorContents(input.Contents, req.RawInputContents, i, input.Datatype, input.Shape),
 		}
 
 		for key, param := range input.Parameters {
@@ -321,7 +320,7 @@ func (s *grpcInferenceServer) convertRESTToGRPCResponse(resp *RESTInferenceRespo
 }
 
 // Helper to convert tensor contents from protobuf to generic data
-func (s *grpcInferenceServer) convertTensorContents(contents *pb.InferTensorContents, rawInputContents [][]byte, index int, datatype string) any {
+func (s *grpcInferenceServer) convertTensorContents(contents *pb.InferTensorContents, rawInputContents [][]byte, index int, datatype string, shape []int64) any {
 	if contents != nil {
 		switch datatype {
 		case "BOOL":
@@ -346,7 +345,7 @@ func (s *grpcInferenceServer) convertTensorContents(contents *pb.InferTensorCont
 	} else if rawInputContents != nil && index < len(rawInputContents) {
 		// If contents is nil, try to convert raw input byte array contents based on datatype
 		rawData := rawInputContents[index]
-		res, err := BytesToTensor(datatype, rawData)
+		res, err := BytesToTensor(datatype, rawData, shape)
 		if err != nil {
 			return nil
 		}
@@ -488,7 +487,9 @@ func (s *grpcInferenceServer) convertDataToTensorContents(data any, datatype str
 	return contents
 }
 
-func BytesToTensor(dataType string, data []byte) (any, error) {
+func BytesToTensor(dataType string, data []byte, shape []int64) (any, error) {
+	// TODO: consider shape for validating the data length matches the expected tensor size based on datatype and shape dimensions
+
 	// Normalize data type to uppercase
 	dataType = strings.ToUpper(dataType)
 
@@ -500,7 +501,8 @@ func BytesToTensor(dataType string, data []byte) (any, error) {
 		}
 		return result, nil
 	case "BYTES":
-		return string(data), nil
+		// TODO: manage better the scenario of multiple byte arrays (e.g. for sequence of strings) - currently we return a single byte array wrapped in a 2D array
+		return [][]byte{data}, nil
 
 	case "UINT8":
 		// Convert to []int to avoid base64 encoding in JSON

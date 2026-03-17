@@ -10,6 +10,7 @@ https://github.com/kserve/open-inference-protocol/blob/main/specification/protoc
 package openinference
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -28,12 +29,64 @@ type RESTInferenceRequest struct {
 	Outputs    []RESTInferOutputTensor `json:"outputs,omitempty"`
 }
 
+func Serialize(r *RESTInferenceRequest) ([]byte, error) {
+	// iterate over inputs and convert any []byte data to base64 string for JSON compatibility
+	for i, input := range r.Inputs {
+		if input.Datatype == "BYTES" {
+			// expect data to be [][]byte or []byte
+			if dataBytes, ok := input.Data.([]byte); ok {
+				r.Inputs[i].Data = base64.StdEncoding.EncodeToString(dataBytes)
+			} else if dataBytesArray, ok := input.Data.([][]byte); ok {
+				strArray := make([]string, len(dataBytesArray))
+				for j, b := range dataBytesArray {
+					strArray[j] = base64.StdEncoding.EncodeToString(b)
+				}
+				r.Inputs[i].Data = strArray
+			}
+		}
+	}
+	return json.Marshal(r)
+}
+
 type RESTInferenceResponse struct {
 	ModelName    string                  `json:"model_name"`
 	ModelVersion string                  `json:"model_version,omitempty"`
 	ID           string                  `json:"id,omitempty"`
 	Parameters   map[string]any          `json:"parameters,omitempty"`
 	Outputs      []RESTInferOutputTensor `json:"outputs"`
+}
+
+func Deserialize(data []byte) (*RESTInferenceResponse, error) {
+	// expect data to be JSON with base64-encoded strings for BYTES datatype, need to decode them back to []byte
+	var temp RESTInferenceResponse
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return nil, err
+	}
+
+	// iterate over outputs and decode any base64 strings back to []byte for BYTES datatype
+	for i, output := range temp.Outputs {
+		if output.Datatype == "BYTES" {
+			// expect data to be string or []string
+			if dataStr, ok := output.Data.(string); ok {
+				decodedData, err := base64.StdEncoding.DecodeString(dataStr)
+				if err != nil {
+					return nil, err
+				}
+				temp.Outputs[i].Data = decodedData
+			} else if dataStrArray, ok := output.Data.([]string); ok {
+				byteArray := make([][]byte, len(dataStrArray))
+				for j, s := range dataStrArray {
+					decodedData, err := base64.StdEncoding.DecodeString(s)
+					if err != nil {
+						return nil, err
+					}
+					byteArray[j] = decodedData
+				}
+				temp.Outputs[i].Data = byteArray
+			}
+		}
+	}
+	return &temp, nil
 }
 
 type RESTInferInputTensor struct {
@@ -198,6 +251,14 @@ func (oi *openInference) handleModelInfer(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// extra conversion, serialize the request again to ensure any []byte data is properly base64-encoded for JSON compatibility when passing through nuclio event
+	body, err = Serialize(&inferRequest)
+	if err != nil {
+		oi.Logger.WarnWith("Failed to serialize inference request", "error", err)
+		http.Error(w, "Failed to process request", http.StatusInternalServerError)
+		return
+	}
+
 	// Create nuclio event with the REST inference request as body
 	event := &Event{
 		body: body,
@@ -235,8 +296,9 @@ func (oi *openInference) handleModelInfer(w http.ResponseWriter, r *http.Request
 	switch typedResponse := response.(type) {
 	case nuclio.Response:
 		// Parse the response body as inference response
-		var inferResponse RESTInferenceResponse
-		if err := json.Unmarshal(typedResponse.Body, &inferResponse); err != nil {
+		var inferResponse *RESTInferenceResponse
+		var err error
+		if inferResponse, err = Deserialize(typedResponse.Body); err != nil {
 			oi.Logger.WarnWith("Failed to parse function response", "error", err)
 			http.Error(w, "Invalid function response", http.StatusInternalServerError)
 			return
