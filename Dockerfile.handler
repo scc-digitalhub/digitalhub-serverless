@@ -9,9 +9,12 @@ ARG NUCLIO_LABEL=latest
 ARG NUCLIO_ARCH=amd64
 ARG NUCLIO_DOCKER_IMAGE_TAG=1.13.2-${NUCLIO_ARCH}
 ARG NUCLIO_DOCKER_REPO=quay.io/nuclio
-
-ARG ver_sdk=0.15.0b15
-ARG ver_python=0.15.0b9
+ARG UV_IMAGE_TAG=latest
+ARG DH_SDK_VERSION=0.15.0b15
+ARG DH_PYTHON_VERSION=0.15.0b9
+ARG HOME=/home/nonroot
+ARG USER=nonroot
+ARG UID=8877
 
 # GO-BUILDER (processor)
 FROM golang:1.25 AS go-builder
@@ -20,52 +23,70 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . ./
 RUN set -euo pipefail; \
-    CGO_ENABLED=0 \
-      go build \
-        -ldflags="-s -w \
-          -X github.com/v3io/version-go.gitCommit=unknown \
-          -X github.com/v3io/version-go.label=latest" \
-        -o /out/processor \
-        cmd/processor/main.go
+  CGO_ENABLED=0 \
+  go build \
+  -ldflags="-s -w \
+  -X github.com/v3io/version-go.gitCommit=unknown \
+  -X github.com/v3io/version-go.label=latest" \
+  -o /out/processor \
+  cmd/processor/main.go
 
-# PYTHON-BASE
-FROM python:${PYTHON_VERSION}-slim AS python-base
-ARG ver_sdk
-ARG ver_python
-RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/* && \
-    useradd -r -m -u 8877 nonroot
-USER 8877
-RUN python -m pip install "digitalhub[full]==${ver_sdk}" \
-                          "digitalhub-runtime-python==${ver_python}"
-ENV PATH="/home/nonroot/.local/bin:$PATH"
-ENV PYTHONPATH="/home/nonroot/.local/lib/python${PYTHON_VERSION}/site-packages"
-WORKDIR /shared
-
-# PYTHON-WHEELS
-FROM python:${PYTHON_VERSION}-slim AS python-wheels
-COPY pkg/processor/runtime/python/py/requirements /requirements
-RUN pip download --dest /whl --exists-action i --requirement /requirements/common.txt
 
 # ONBUILD
 FROM ${NUCLIO_DOCKER_REPO}/handler-builder-python-onbuild:${NUCLIO_DOCKER_IMAGE_TAG} AS onbuild
-ARG PYTHON_VERSION
-COPY pkg/processor/runtime/python/py /opt/nuclio
-COPY --from=go-builder /out/processor /home/nuclio/bin/processor
-COPY --from=python-wheels /whl /home/nuclio/bin/py${PYTHON_VERSION}-whl
 
 # UHTTPC
 FROM nuclio/uhttpc:0.0.1-amd64 AS uhttpc
 
-# HANDLER (final image)
-FROM python-base AS handler
+# PYTHON-WHEELS
+FROM python:${PYTHON_VERSION}-slim AS python-wheels
+ARG DH_SDK_VERSION
+ARG DH_PYTHON_VERSION
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
+COPY --from=onbuild /home/nuclio/bin/py/requirements/common.txt /requirements/nuclio.txt
+RUN python -m pip download --dest /whl --exists-action i --only-binary=:all: --requirement /requirements/nuclio.txt
+COPY pkg/processor/runtime/python/py/requirements/common.txt /requirements/common.txt
+RUN printf '%b\n' "digitalhub[full]==${DH_SDK_VERSION}\ndigitalhub-runtime-python==${DH_PYTHON_VERSION}" >> /requirements/common.txt
+RUN python -m pip install wheel && python -m pip wheel -w /whl --requirement /requirements/common.txt
+
+# UV
+FROM ghcr.io/astral-sh/uv:${UV_IMAGE_TAG} AS uv
+
+# PYTHON-HANDLER (final image)
+FROM python:${PYTHON_VERSION}-slim 
+ARG PYTHON_VERSION
+ARG DH_SDK_VERSION
+ARG DH_PYTHON_VERSION
+ARG HOME=/home/nonroot
+ARG USER=nonroot
+ARG UID=8877
 LABEL org.opencontainers.image.source=https://github.com/scc-digitalhub/digitalhub-serverless
-COPY --from=onbuild /home/nuclio/bin/processor /usr/local/bin/processor
-COPY --from=onbuild /home/nuclio/bin/py /opt/nuclio/
-COPY --from=onbuild /opt/nuclio/ /opt/nuclio/
-COPY --from=onbuild /home/nuclio/bin/py*-whl/* /opt/nuclio/whl/
 COPY --from=uhttpc /home/nuclio/bin/uhttpc /usr/local/bin/uhttpc
+COPY --from=onbuild /home/nuclio/bin/py /opt/nuclio/
+COPY --from=onbuild /home/nuclio/bin/py/requirements/common.txt /opt/nuclio/requirements/nuclio.txt
+COPY --from=go-builder /out/processor /opt/nuclio/processor
+COPY pkg/processor/runtime/python/py /opt/nuclio
+COPY --from=python-wheels /whl /opt/nuclio/whl/
+COPY --from=python-wheels /requirements/common.txt /opt/nuclio/requirements/common.txt
+COPY --from=uv /uv /uvx /usr/local/bin/
+# install build essentials to be able to install some dependencies from source, if needed
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
+#install both nuclio and our dependencies leveraging the pre-downloaded wheels
 RUN python /opt/nuclio/whl/$(basename /opt/nuclio/whl/pip-*.whl)/pip install pip --no-index --find-links /opt/nuclio/whl \
-    && python -m pip install -r /opt/nuclio/requirements/common.txt
+  && python -m pip install --no-index --find-links /opt/nuclio/whl -r /opt/nuclio/requirements/nuclio.txt
+RUN cat /opt/nuclio/requirements/common.txt
+# RUN python -m pip install --no-index \
+#   --cache-dir /opt/nuclio/whl --find-links /opt/nuclio/whl -r /opt/nuclio/requirements/common.txt
+RUN uv  pip install --system --no-index \ 
+  --cache-dir /opt/nuclio/whl --find-links /opt/nuclio/whl -r /opt/nuclio/requirements/common.txt
+# cleanup to shave off couple hundreds MBs
+RUN apt-get clean && rm -rf /opt/nuclio/whl
+# add user
+RUN useradd -r -d ${HOME} -m -u ${UID} ${USER}
+USER ${USER}
+WORKDIR ${HOME}
+ENV PATH="${HOME}/.local/bin:$PATH"
+ENV PYTHONPATH="${HOME}/.local/lib/python${PYTHON_VERSION}/site-packages"
 HEALTHCHECK --interval=1s --timeout=3s CMD /usr/local/bin/uhttpc --url http://127.0.0.1:8082/ready || exit 1
-COPY . /opt/nuclio
-CMD [ "processor" ]
+# COPY . /opt/nuclio
+CMD [ "/opt/nuclio/processor" ]
