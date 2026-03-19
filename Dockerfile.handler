@@ -68,7 +68,7 @@ COPY --from=go-builder /out/processor /opt/nuclio/processor
 COPY pkg/processor/runtime/python/py /opt/nuclio
 COPY --from=python-wheels /whl /opt/nuclio/whl/
 COPY --from=python-wheels /requirements/common.txt /opt/nuclio/requirements/common.txt
-COPY --from=uv /uv /uvx /usr/local/bin/
+COPY --from=uv /uv /uvx /opt/nuclio/uv/
 # install build essentials to be able to install some dependencies from source, if needed
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
 #install both nuclio and our dependencies leveraging the pre-downloaded wheels
@@ -77,7 +77,7 @@ RUN python /opt/nuclio/whl/$(basename /opt/nuclio/whl/pip-*.whl)/pip install pip
 RUN cat /opt/nuclio/requirements/common.txt
 # RUN python -m pip install --no-index \
 #   --cache-dir /opt/nuclio/whl --find-links /opt/nuclio/whl -r /opt/nuclio/requirements/common.txt
-RUN uv  pip install --system --no-index \ 
+RUN /opt/nuclio/uv/uv  pip install --system --no-index \ 
   --cache-dir /opt/nuclio/whl --find-links /opt/nuclio/whl -r /opt/nuclio/requirements/common.txt
 # cleanup to shave off couple hundreds MBs
 RUN apt-get clean && rm -rf /opt/nuclio/whl
