@@ -1,8 +1,6 @@
 package rtsp
 
 import (
-	"fmt"
-
 	"github.com/nuclio/errors"
 	"github.com/nuclio/logger"
 	"github.com/nuclio/nuclio/pkg/functionconfig"
@@ -68,6 +66,5 @@ func (f *factory) Create(parentLogger logger.Logger,
 }
 
 func init() {
-	fmt.Println("Registering RTSP trigger")
 	trigger.RegistrySingleton.Register("rtsp", &factory{})
 }
