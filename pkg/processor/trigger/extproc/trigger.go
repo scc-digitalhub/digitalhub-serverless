@@ -219,18 +219,35 @@ func (ep *extproc) handleRequest(ctx *RequestContext, body []byte) (*nuclio.Resp
 	// format the response into the context, based on its type
 	switch typedResponse := response.(type) {
 	case nuclio.Response:
-		typedResponse.StatusCode = 0
+		statusCode := typedResponse.StatusCode
 		// if the response contains a processing status, use it as the response status code ignoring the status code which is default 200
 		if typedResponse.Headers != nil {
 			val, ok := typedResponse.Headers["X-Processing-Status"]
 			if ok {
 				delete(typedResponse.Headers, "X-Processing-Status")
-				status, statusErr := strconv.Atoi(string(val.(string)))
-				if statusErr == nil {
-					typedResponse.StatusCode = status
+				switch v := val.(type) {
+				case string:
+					if n, err := strconv.Atoi(v); err == nil {
+						statusCode = n
+					}
+				case int:
+					statusCode = v
+				case int32:
+					statusCode = int(v)
+				case int64:
+					statusCode = int(v)
+				case float32:
+					statusCode = int(v)
+				case float64:
+					statusCode = int(v)
 				}
 			}
 		}
+		// if the status code is 200, set it to 0 to indicate that the status code is not set and should be determined by the processing phase
+		if statusCode == 200 {
+			statusCode = 0
+		}
+		typedResponse.StatusCode = statusCode
 		return &typedResponse, nil
 
 	case []byte:

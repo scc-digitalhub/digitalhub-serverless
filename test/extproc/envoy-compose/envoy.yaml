@@ -37,7 +37,7 @@ static_resources:
                         envoy_grpc:
                           cluster_name: testextproc
                         timeout: 30s
-                      failure_mode_allow: true
+                      # failure_mode_allow: true
                       message_timeout: 1s
                       processing_mode:
                         request_header_mode: SEND
