@@ -1,10 +1,12 @@
 # SPDX-FileCopyrightText: © 2025 DSLab - Fondazione Bruno Kessler
 #
 # SPDX-License-Identifier: Apache-2.0
-ARG PYTHON_VERSION=3.13
+ARG PYTHON_VERSION=3.12
 
+ARG NUCLIO_LABEL=latest
+ARG NUCLIO_ARCH=amd64
+ARG NUCLIO_DOCKER_IMAGE_TAG=${NUCLIO_LABEL}-${NUCLIO_ARCH}
 ARG NUCLIO_DOCKER_REPO=quay.io/nuclio
-ARG NUCLIO_DOCKER_IMAGE_TAG=1.13.2-amd64
 ARG UV_IMAGE_TAG=latest
 ARG DH_SDK_VERSION=0.15.0b21
 ARG DH_PYTHON_VERSION=0.15.0b18
@@ -39,6 +41,8 @@ ARG DH_SDK_VERSION
 ARG DH_PYTHON_VERSION
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
 COPY --from=onbuild /home/nuclio/bin/py/requirements/common.txt /requirements/nuclio.txt
+# cleanup nuclio dependencies to avoid conflicts, these will be added when needed at install time
+RUN sed -i -e '/^mock==/d' -e '/^pip==/d' -e '/^setuptools==/d' -e '/^wheel==/d' /requirements/nuclio.txt
 RUN pip download --dest /whl --exists-action i --only-binary=:all: --requirement /requirements/nuclio.txt
 COPY pkg/processor/runtime/python/py/requirements/common.txt /requirements/common.txt
 RUN printf '%b\n' "digitalhub[full]==${DH_SDK_VERSION}\ndigitalhub-runtime-python==${DH_PYTHON_VERSION}" >> /requirements/common.txt
@@ -50,10 +54,10 @@ ARG DH_SDK_VERSION
 ARG DH_PYTHON_VERSION
 LABEL org.opencontainers.image.source=https://github.com/scc-digitalhub/digitalhub-serverless
 COPY --from=onbuild /home/nuclio/bin/py /opt/nuclio/
-COPY --from=onbuild /home/nuclio/bin/py/requirements/common.txt /opt/nuclio/requirements/nuclio.txt
 COPY --from=go-builder /out/processor /opt/nuclio/processor
 COPY pkg/processor/runtime/python/py /opt/nuclio
 COPY --from=python-wheels /whl /opt/nuclio/whl/
+COPY --from=python-wheels /requirements/nuclio.txt /opt/nuclio/requirements/nuclio.txt
 COPY --from=python-wheels /requirements/common.txt /opt/nuclio/requirements/common.txt
 COPY --from=uv /uv /uvx /opt/nuclio/uv/
 
