@@ -12,6 +12,7 @@ package openinference
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -73,9 +74,15 @@ func Deserialize(data []byte) (*RESTInferenceResponse, error) {
 					return nil, err
 				}
 				temp.Outputs[i].Data = decodedData
-			} else if dataStrArray, ok := output.Data.([]string); ok {
-				byteArray := make([][]byte, len(dataStrArray))
-				for j, s := range dataStrArray {
+			} else if dataAnyArray, ok := output.Data.([]any); ok {
+				// JSON decoding always yields []any (never []string): decode each
+				// base64 element so gRPC clients get real bytes, not base64 text.
+				byteArray := make([][]byte, len(dataAnyArray))
+				for j, e := range dataAnyArray {
+					s, isStr := e.(string)
+					if !isStr {
+						return nil, fmt.Errorf("BYTES output %q element %d is not a string", output.Name, j)
+					}
 					decodedData, err := base64.StdEncoding.DecodeString(s)
 					if err != nil {
 						return nil, err
@@ -168,7 +175,14 @@ func (oi *openInference) handleModelEndpoints(w http.ResponseWriter, r *http.Req
 
 	path := r.URL.Path
 
-	// Simple routing based on path suffix
+	// Simple routing based on path suffix. infer/ready validate the {model_name}
+	// segment like gRPC ModelReady does, instead of accepting any name.
+	if strings.HasSuffix(path, "/ready") || strings.HasSuffix(path, "/infer") {
+		if name := modelNameFromPath(path); name != oi.configuration.ModelName {
+			http.Error(w, "Model not found", http.StatusNotFound)
+			return
+		}
+	}
 	if strings.HasSuffix(path, "/ready") {
 		oi.handleModelReady(w, r)
 	} else if strings.HasSuffix(path, "/infer") {
@@ -178,6 +192,19 @@ func (oi *openInference) handleModelEndpoints(w http.ResponseWriter, r *http.Req
 	} else {
 		http.Error(w, "Not found", http.StatusNotFound)
 	}
+}
+
+// modelNameFromPath extracts {model_name} from /v2/models/{model_name}[/versions/{v}]/...
+func modelNameFromPath(path string) string {
+	const prefix = "/v2/models/"
+	if !strings.HasPrefix(path, prefix) {
+		return ""
+	}
+	rest := strings.TrimPrefix(path, prefix)
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		return rest[:i]
+	}
+	return rest
 }
 
 func (oi *openInference) handleServerMetadata(w http.ResponseWriter, r *http.Request) {
@@ -234,9 +261,15 @@ func (oi *openInference) handleModelInfer(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Read request body
+	// Read request body, bounded to the same 512MB the gRPC server accepts so an
+	// oversized/unbounded body cannot OOM the pod (io.ReadAll grows in memory).
+	r.Body = http.MaxBytesReader(w, r.Body, 512*1024*1024)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		if _, tooLarge := err.(*http.MaxBytesError); tooLarge {
+			http.Error(w, "Request body too large (max 512MB)", http.StatusRequestEntityTooLarge)
+			return
+		}
 		oi.Logger.WarnWith("Failed to read request body", "error", err)
 		http.Error(w, "Failed to read request", http.StatusBadRequest)
 		return
@@ -274,10 +307,13 @@ func (oi *openInference) handleModelInfer(w http.ResponseWriter, r *http.Request
 	}
 
 	// Submit to worker
+	// Worker-ALLOCATION timeout (not a processing timeout): with few workers and a
+	// slow inference in flight, concurrent requests wait here for a free worker —
+	// 60s lets them queue instead of failing fast at 10s.
 	response, submitError, processError := oi.AllocateWorkerAndSubmitEvent(
 		event,
 		oi.Logger,
-		10*time.Second,
+		60*time.Second,
 	)
 
 	if submitError != nil {

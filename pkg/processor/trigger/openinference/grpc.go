@@ -20,6 +20,8 @@ import (
 	"github.com/nuclio/nuclio-sdk-go"
 	pb "github.com/scc-digitalhub/digitalhub-serverless/pkg/proto/inference/v2"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // grpcInferenceServer implements the GRPCInferenceService
@@ -106,6 +108,10 @@ func (s *grpcInferenceServer) ModelMetadata(ctx context.Context, req *pb.ModelMe
 
 // ModelInfer - Perform inference using a specific model
 func (s *grpcInferenceServer) ModelInfer(ctx context.Context, req *pb.ModelInferRequest) (*pb.ModelInferResponse, error) {
+	// Validate the requested model name (mirrors ModelReady and the REST path).
+	if req.ModelName != "" && req.ModelName != s.trigger.configuration.ModelName {
+		return nil, status.Errorf(codes.NotFound, "model '%s' not found", req.ModelName)
+	}
 	// Convert gRPC request to REST format for processing
 	restRequest := s.convertGRPCToRESTRequest(req)
 
@@ -132,10 +138,11 @@ func (s *grpcInferenceServer) ModelInfer(ctx context.Context, req *pb.ModelInfer
 	}
 
 	// Submit to worker
+	// Worker-ALLOCATION timeout (see rest.go): queue up to 60s for a free worker.
 	response, submitError, processError := s.trigger.AllocateWorkerAndSubmitEvent(
 		event,
 		s.trigger.Logger,
-		10*time.Second,
+		60*time.Second,
 	)
 
 	if submitError != nil {
