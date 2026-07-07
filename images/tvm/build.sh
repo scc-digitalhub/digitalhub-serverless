@@ -5,11 +5,11 @@
 # container. No python wrapper.
 #
 # Usage: ./build.sh [--load] [--push]
-#   TAG=<repo:tag>         image name         (default tvm-runtime-go:0.24)
+#   TAG=<repo:tag>         image name         (default tvm-runtime-go:0.25)
 #   REGISTRY=<host[/org]>  push target prefix (the pushed ref is $REGISTRY/$TAG)
 #   --load  -> minikube image load (local dev)     --push -> push to the registry
 # Remote cluster: build, --push to your registry, then point CORE at the exact
-# pushed ref via RUNTIME_TVM_SERVE (e.g. RUNTIME_TVM_SERVE=ghcr.io/acme/tvm-runtime-go:0.24).
+# pushed ref via RUNTIME_TVM_SERVE (e.g. RUNTIME_TVM_SERVE=ghcr.io/acme/tvm-runtime-go:0.25).
 # Requires a locally-built TVM (override with TVM_HOME / TVM_BUILD).
 set -euo pipefail
 
@@ -20,11 +20,11 @@ TVM_BUILD="${TVM_BUILD:-$TVM_HOME/build}"
 FFI_INC="$TVM_HOME/3rdparty/tvm-ffi/include"
 DLPACK_INC="$TVM_HOME/3rdparty/tvm-ffi/3rdparty/dlpack/include"
 # Default tag = major.minor of the TVM actually packaged (resolved from the
-# TVM_HOME dir name, e.g. tvm-0.24.0 -> 0.24), so the image tag always matches
+# TVM_HOME dir name, e.g. tvm-0.25.0 -> 0.25), so the image tag always matches
 # its contents. Override with TVM_TAG or a full TAG.
 if [ -z "${TVM_TAG:-}" ]; then
     _v="$(basename "$(readlink -f "$TVM_HOME")")"; _v="${_v#tvm-}"
-    if [[ "$_v" =~ ^[0-9]+\.[0-9]+ ]]; then TVM_TAG="${_v%.*}"; else TVM_TAG="0.24"; fi
+    if [[ "$_v" =~ ^[0-9]+\.[0-9]+ ]]; then TVM_TAG="${_v%.*}"; else TVM_TAG="0.25"; fi
 fi
 TAG="${TAG:-tvm-runtime-go:${TVM_TAG}}"
 REGISTRY="${REGISTRY:-}" # empty = push bare $TAG; set host[/org] to push for a remote cluster

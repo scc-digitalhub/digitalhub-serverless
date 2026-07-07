@@ -13,8 +13,11 @@ A **native Nuclio processor runtime** — registered under the runtime kind
 wrapper and no subprocess**. It is the Go equivalent of the Rust `tvm-serve`
 worker.
 
-- CPU + FP32 only.
+- CPU only. Native dtypes: `FP32`/`FP64`, `INT8/16/32/64`, `UINT8/16/32/64`
+  (`FP16` is deferred and rejected with a clear error).
 - One model per processor, served over REST `8080` / gRPC `9000`.
+- Multiple workers per pod (`TVM_SERVE_WORKERS` → nuclio `numWorkers`): each
+  worker loads its own copy of the model, for up to N concurrent inferences.
 - The `model.so` + `metadata.json` are staged into `TVM_MODEL_DIR` by an init
   container (CORE deployment); the runtime just loads and serves them.
 
@@ -68,7 +71,7 @@ it forwards the job to a dedicated actor goroutine (`modelLoop`) and waits.
         ▼
  openinference trigger ──► worker ──► tvmRuntime.ProcessEvent(event)
         │  json.Unmarshal → v2Request
-        │  buildInputs()  → []tvmrelax.Tensor   (FP32 validate + flattenFloat32)
+        │  buildInputs()  → []tvmrelax.Tensor   (dtype validate + encode bytes)
         │
         │  jobCh <- inferJob{inputs, respCh}         ┌─────────────────────────┐
         ├───────────────────────────────────────────►│  modelLoop goroutine    │
@@ -83,22 +86,26 @@ it forwards the job to a dedicated actor goroutine (`modelLoop`) and waits.
 ```
 
 Notes:
-- **Input dtype:** only `FP32` / `float32` (or empty) accepted; anything else is
-  rejected. `flattenFloat32` walks flat or nested JSON number arrays into a flat
-  row-major `[]float32`.
+- **Input dtype:** native dtypes — `FP32`/`FP64`, `INT8/16/32/64`,
+  `UINT8/16/32/64` (empty defaults to `FP32`); `FP16` and anything else is
+  rejected. `collectNumbers` walks flat or nested JSON number arrays into a flat
+  row-major slice (decoded with `UseNumber` so `INT64` keeps full precision),
+  then `encodeInputBytes` packs them into the tensor's little-endian dtype.
 - **Output naming:** `output_<i>`, overridden by `metadata.Outputs[i].Name` when
-  present; always emitted as `FP32`.
+  present; each output carries its own dtype (a model returning `INT64` indices
+  reports `INT64`), not a forced `FP32`.
 - **`ProcessBatch`** returns `ErrNotImplemented` (single-event serving).
 
 ---
 
-## 3. Single-OS-thread actor pattern
+## 3. Per-worker actor pattern + multi-worker concurrency
 
 The TVM Relax VM and every `tvm-ffi` handle are **not thread-safe** and the ABI
 requires all calls for a model to happen on the **same OS thread**. Nuclio would
 otherwise call `ProcessEvent` from arbitrary worker goroutines (which the Go
-scheduler can migrate across OS threads). The fix is the classic actor pattern —
-identical in spirit to the Rust worker serializing on one thread.
+scheduler can migrate across OS threads). The fix is the classic actor pattern,
+one per runtime instance — the same per-thread serialization the Rust worker
+uses for each thread in its pool.
 
 | Concern | Mechanism |
 |---------|-----------|
@@ -107,10 +114,15 @@ identical in spirit to the Rust worker serializing on one thread.
 | Load once | `tvmrelax.Load()` runs on that thread; result reported on `ready` chan |
 | Serialize infer | jobs arrive on `jobCh`; served one at a time, forever |
 | Reply | each job carries its own private buffered `respCh` |
-| Concurrency | trigger is configured `max_workers: 1`; the loop is the single serializer regardless |
+| Concurrency | one full `tvmRuntime` (loop + model copy) **per nuclio worker**; the loop is the single serializer within a worker |
 
-So `max_workers` could be >1 for request parsing, but inference is always
-one-at-a-time through the single loop.
+Concurrency across requests comes from running several nuclio **workers**:
+`numWorkers` (set from `TVM_SERVE_WORKERS`, default `1`) makes the factory build
+that many `tvmRuntime` instances, each with its own pinned thread, its own
+`modelLoop`, and its **own loaded copy of the model**. So N workers serve up to N
+inferences at once, at the cost of N model copies in memory; within any single
+worker inference is still one-at-a-time through its loop. This is per-pod
+concurrency — horizontal scaling via `replicas` (separate pods) is orthogonal.
 
 ---
 
@@ -119,8 +131,8 @@ one-at-a-time through the single loop.
 `tvmrelax/tvmrelax.go` reproduces, in Go + a little C glue, what the Rust
 `tvm-relax` crate does. TVM ships **no** high-level Relax-VM binding, so the
 model is driven through raw `PackedFunc` calls over TVM's `tvm-ffi` C ABI. The
-Go side only ever exchanges flat `[]float32` + `[]int64` shapes; all ABI packing
-lives in the embedded C helpers.
+Go side only ever exchanges raw little-endian bytes + a DLPack dtype (`code`,
+`bits`) + `[]int64` shapes; all ABI packing lives in the embedded C helpers.
 
 ### The 5-call load/run dance
 
@@ -141,7 +153,7 @@ out   = entry(inputs...)                      // run → a Tensor or an Array<Te
 | Ownership | a call returns an **owned** handle in `ret.v_obj` → must `TVMFFIObjectDecRef` when done |
 | Globals | named globals (`ffi.ModuleLoadFromFile`, `ffi.ModuleGetFunction`, `ffi.ArrayGetItem`, `ffi.ArraySize`) resolved once and cached in `tvm_model_t` |
 | Tensors in | inputs **copied** into C-malloc'd buffers, wrapped as DLPack `DLManagedTensor` (own `deleter`), imported via `TVMFFITensorFromDLPack` — so Go memory need not outlive the call |
-| Tensors out | result exported via `TVMFFITensorToDLPack`, copied back into a fresh Go `[]float32`, then freed |
+| Tensors out | result exported via `TVMFFITensorToDLPack`, copied back into a fresh Go `[]byte` (with its DLPack dtype), then freed |
 | Multi-output | if `entry` returns `kTVMFFIArray`, iterate with `ArraySize` + `ArrayGetItem`; single tensor returns `kTVMFFITensor` directly |
 | Safety | `runtime.KeepAlive` guards input `Data`/`Shape` across the cgo call; refs freed on every error path |
 
@@ -172,13 +184,15 @@ references no symbol from it directly (it registers the ffi globals at load).
 
 ## 5. The serving image (`images/tvm/`)
 
-Builds `tvm-runtime-go`: a Nuclio processor with the `tvm` runtime compiled in.
+Builds `tvm-runtime-go`: a Nuclio processor with the `tvm` runtime compiled in,
+linked against TVM (currently **0.25**); `build.sh` tags the image with that TVM
+version (e.g. `tvm-runtime-go:0.25`).
 
 | File | Purpose |
 |------|---------|
 | `build.sh` | stages the build context: copies tvm-ffi/dlpack headers → `tvm-include/`, `libtvm_ffi.so`+`libtvm_runtime.so` → `tvm-lib/`, rsyncs repo source → `src/`; `docker build`; optional `--load` (minikube) / `--push` |
 | `Dockerfile` | 2-stage: **build** = `golang:1.25` with `CGO_ENABLED=1` + `CGO_CFLAGS/LDFLAGS` pointing at `/opt/tvm`, `go build ./cmd/processor/main.go`; **runtime** = `ubuntu:24.04` + `libstdc++6`, copies the two TVM `.so`s and the processor |
-| `entrypoint.sh` | generates `/tmp/processor.yaml` from env (`spec.runtime: tvm`, `openinference` trigger with REST/gRPC ports, `max_workers: 1`), then `exec`s the processor with `--config` |
+| `entrypoint.sh` | generates `/tmp/processor.yaml` from env (`spec.runtime: tvm`, `openinference` trigger with REST/gRPC ports and `numWorkers: $TVM_SERVE_WORKERS`, plus the v2 input/output tensor metadata pulled from `metadata.json` via `jq`), then `exec`s the processor with `--config` |
 
 Runtime env baked into the image:
 
@@ -189,6 +203,7 @@ Runtime env baked into the image:
 | `TVM_MODEL_NAME` | `model` | served model name (v2 `model_name`) |
 | `TVM_SERVE_PORT` | `8080` | REST |
 | `TVM_SERVE_GRPC_PORT` | `9000` | gRPC |
+| `TVM_SERVE_WORKERS` | `1` | nuclio `numWorkers`: model copies / max concurrent inferences per pod |
 
 The `processor.yaml` is written to `/tmp` (world-writable) because the pod runs
 as a non-root UID and `/etc` is not writable.
@@ -242,8 +257,12 @@ host language of the in-process TVM driver:
 | Wire | OpenInference v2 REST/gRPC | OpenInference v2 REST/gRPC |
 | Model contract | `TVM_MODEL_DIR` / `model.so` + `metadata.json` | identical |
 | CORE default | **yes** (`runtime.tvm.serve` default) | selectable alternative |
-| Precision | CPU + FP32 | CPU + FP32 |
+| Precision | CPU, native dtypes (FP16 deferred) | CPU, native dtypes (FP16 deferred) |
+| Concurrency | pool of N OS threads, N model copies | N nuclio workers, N model copies |
+
+Both scale to N concurrent inferences per pod via `TVM_SERVE_WORKERS`, each at
+the cost of N in-memory model copies.
 
 CORE currently defaults `runtime.tvm.serve` to
-`ghcr.io/scc-digitalhub/tvm-runtime-rust`; point it (or `task.image`) at the Go
-image to switch, with no other change to the compile/serve flow.
+`ghcr.io/scc-digitalhub/tvm-runtime-rust:0.25`; point it (or `task.image`) at the
+Go image to switch, with no other change to the compile/serve flow.

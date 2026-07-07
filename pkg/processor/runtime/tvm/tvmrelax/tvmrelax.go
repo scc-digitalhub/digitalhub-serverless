@@ -19,7 +19,8 @@ SPDX-License-Identifier: Apache-2.0
 //
 // All the fiddly ABI work (packing TVMFFIAny arguments, wrapping buffers as
 // DLTensors, reference counting) is kept in the C helpers below, so the Go side
-// only ever exchanges flat []float32 + shapes. CPU + FP32 only.
+// only ever exchanges raw little-endian bytes + a DLPack dtype (code, bits) +
+// shapes. CPU only; the native dtypes are supported (FP16 is deferred).
 //
 // NOT thread-safe: the VM and every tvm-ffi handle must be used from ONE OS thread.
 // The caller pins a dedicated goroutine for Load+Infer (see the runtime's modelLoop).
@@ -99,13 +100,17 @@ static void tvm_take_error(const char* ctx, char* buf, int cap) {
   snprintf(buf, cap, "%s: tvm-ffi call failed", ctx);
 }
 
-// FP32-only contract: tvm_out_copy memcpy's raw bytes into a []float32, so any
-// other output dtype would silently produce garbage (or read out of bounds for
-// wider types). Reject with a clear error instead.
-static int tvm_check_out_f32(tvm_result_t* res, int i, char* err, int cap) {
+// Accept only the native dtypes this image can serve (scalar lanes; float 32/64,
+// int/uint 8/16/32/64). FP16 and others are deferred: reject with a clear error
+// rather than copying raw bytes the Go side can't interpret.
+static int tvm_check_out_supported(tvm_result_t* res, int i, char* err, int cap) {
   DLDataType dt = res->outs[i]->dl_tensor.dtype;
-  if (dt.code != kDLFloat || dt.bits != 32 || dt.lanes != 1) {
-    snprintf(err, cap, "output[%d] dtype (code=%d bits=%d lanes=%d) unsupported: FP32 only",
+  int ok = dt.lanes == 1 && (
+    (dt.code == kDLFloat && (dt.bits == 32 || dt.bits == 64)) ||
+    (dt.code == kDLInt   && (dt.bits == 8 || dt.bits == 16 || dt.bits == 32 || dt.bits == 64)) ||
+    (dt.code == kDLUInt  && (dt.bits == 8 || dt.bits == 16 || dt.bits == 32 || dt.bits == 64)));
+  if (!ok) {
+    snprintf(err, cap, "output[%d] dtype (code=%d bits=%d lanes=%d) unsupported (FP16/others deferred)",
              i, (int)dt.code, (int)dt.bits, (int)dt.lanes);
     return -1;
   }
@@ -174,16 +179,18 @@ static int tvm_model_load(const char* so_path, const char* entry,
   return 0;
 }
 
-// add one FP32 input by COPYING data+shape into C memory wrapped as an ffi.Tensor
-// (so Go memory need not outlive the call). type_index for the call arg = Tensor.
-static int tvm_input_add(tvm_inputs_t* in, const float* data, int ndim,
+// add one input by COPYING data+shape into C memory wrapped as an ffi.Tensor (so
+// Go memory need not outlive the call). `data` is `nbytes` of raw little-endian
+// bytes of the tensor's dtype (code, bits); the Go side has already packed the
+// numbers, so this path is the same for every dtype.
+static int tvm_input_add(tvm_inputs_t* in, const void* data, long long nbytes,
+                         unsigned char code, unsigned char bits, int ndim,
                          const long long* shape, char* err, int cap) {
   if (in->n >= TVM_MAX_OUT) { snprintf(err, cap, "too many inputs"); return -1; }
-  long long numel = 1;
   int64_t* shp = (int64_t*)malloc(sizeof(int64_t) * (ndim > 0 ? ndim : 1));
-  for (int k = 0; k < ndim; k++) { shp[k] = (int64_t)shape[k]; numel *= shape[k]; }
-  float* buf = (float*)malloc(sizeof(float) * (numel > 0 ? numel : 1));
-  if (numel > 0) memcpy(buf, data, sizeof(float) * numel);
+  for (int k = 0; k < ndim; k++) shp[k] = (int64_t)shape[k];
+  void* buf = malloc(nbytes > 0 ? (size_t)nbytes : 1);
+  if (nbytes > 0) memcpy(buf, data, (size_t)nbytes);
 
   DLManagedTensor* mt = (DLManagedTensor*)malloc(sizeof(DLManagedTensor));
   memset(mt, 0, sizeof(*mt));
@@ -191,8 +198,8 @@ static int tvm_input_add(tvm_inputs_t* in, const float* data, int ndim,
   mt->dl_tensor.device.device_type = kDLCPU;
   mt->dl_tensor.device.device_id = 0;
   mt->dl_tensor.ndim = ndim;
-  mt->dl_tensor.dtype.code = kDLFloat;
-  mt->dl_tensor.dtype.bits = 32;
+  mt->dl_tensor.dtype.code = code;
+  mt->dl_tensor.dtype.bits = bits;
   mt->dl_tensor.dtype.lanes = 1;
   mt->dl_tensor.shape = shp;
   mt->dl_tensor.strides = NULL;
@@ -231,7 +238,7 @@ static int tvm_model_run(tvm_model_t* m, tvm_inputs_t* in, tvm_result_t* out,
     if (TVMFFITensorToDLPack(h, &out->outs[0]) != 0) { tvm_take_error("ToDLPack", err, cap); TVMFFIObjectDecRef(h); return -1; }
     TVMFFIObjectDecRef(h);
     out->n = 1;
-    if (tvm_check_out_f32(out, 0, err, cap) != 0) return -1; // caller frees via tvm_result_free
+    if (tvm_check_out_supported(out, 0, err, cap) != 0) return -1; // caller frees via tvm_result_free
     return 0;
   }
   if (r.type_index == kTVMFFIArray) {
@@ -251,7 +258,7 @@ static int tvm_model_run(tvm_model_t* m, tvm_inputs_t* in, tvm_result_t* out,
       if (TVMFFITensorToDLPack(th, &out->outs[out->n]) != 0) { tvm_take_error("ToDLPack[i]", err, cap); TVMFFIObjectDecRef(th); TVMFFIObjectDecRef(arr); return -1; }
       TVMFFIObjectDecRef(th);
       out->n++;
-      if (tvm_check_out_f32(out, out->n - 1, err, cap) != 0) { TVMFFIObjectDecRef(arr); return -1; }
+      if (tvm_check_out_supported(out, out->n - 1, err, cap) != 0) { TVMFFIObjectDecRef(arr); return -1; }
     }
     TVMFFIObjectDecRef(arr);
     return 0;
@@ -262,15 +269,20 @@ static int tvm_model_run(tvm_model_t* m, tvm_inputs_t* in, tvm_result_t* out,
 
 static int     tvm_out_ndim(tvm_result_t* res, int i) { return res->outs[i]->dl_tensor.ndim; }
 static long long tvm_out_dim(tvm_result_t* res, int i, int k) { return (long long)res->outs[i]->dl_tensor.shape[k]; }
-static long long tvm_out_numel(tvm_result_t* res, int i) {
+static int       tvm_out_dtype_code(tvm_result_t* res, int i) { return (int)res->outs[i]->dl_tensor.dtype.code; }
+static int       tvm_out_dtype_bits(tvm_result_t* res, int i) { return (int)res->outs[i]->dl_tensor.dtype.bits; }
+static long long tvm_out_nbytes(tvm_result_t* res, int i) {
   DLTensor* t = &res->outs[i]->dl_tensor; long long n = 1;
   for (int k = 0; k < t->ndim; k++) n *= t->shape[k];
-  return n;
+  return n * (long long)((t->dtype.bits + 7) / 8);
 }
-static void tvm_out_copy(tvm_result_t* res, int i, float* dst) {
+// copy the output's raw little-endian bytes (element size from its dtype); the Go
+// side decodes them into a typed slice.
+static void tvm_out_copy(tvm_result_t* res, int i, void* dst) {
   DLTensor* t = &res->outs[i]->dl_tensor; long long n = 1;
   for (int k = 0; k < t->ndim; k++) n *= t->shape[k];
-  if (n > 0) memcpy(dst, t->data, (size_t)n * sizeof(float));
+  long long nbytes = n * (long long)((t->dtype.bits + 7) / 8);
+  if (nbytes > 0) memcpy(dst, t->data, (size_t)nbytes);
 }
 static void tvm_result_free(tvm_result_t* res) {
   for (int i = 0; i < res->n; i++) {
@@ -289,11 +301,17 @@ import (
 	"unsafe"
 )
 
-// Tensor is a CPU/FP32 named tensor (row-major contiguous).
+// Tensor is a CPU named tensor (row-major contiguous). Data holds the raw
+// little-endian element bytes for the DLPack dtype (Code, Bits) — e.g.
+// (kDLFloat, 32) for FP32, (kDLInt, 64) for INT64 — so any native dtype crosses
+// the cgo boundary the same way. The v2 datatype <-> (code, bits) mapping lives
+// in the caller (package tvm) to keep this binding dtype-agnostic.
 type Tensor struct {
 	Name  string
 	Shape []int64
-	Data  []float32
+	Code  uint8
+	Bits  uint8
+	Data  []byte
 }
 
 // Model holds the loaded Relax VM + cached entry function. Not thread-safe.
@@ -317,8 +335,9 @@ func Load(soPath, entry string) (*Model, error) {
 	return m, nil
 }
 
-// Infer runs the entry function with the given FP32 inputs (positional) and
-// returns the output tensors. Must run on the Model's OS thread.
+// Infer runs the entry function with the given inputs (positional) and returns
+// the output tensors, each carrying its raw little-endian bytes plus DLPack dtype
+// (Code, Bits). Must run on the Model's OS thread.
 func (m *Model) Infer(inputs []Tensor) ([]Tensor, error) {
 	var in C.tvm_inputs_t
 	in.n = 0
@@ -326,15 +345,16 @@ func (m *Model) Infer(inputs []Tensor) ([]Tensor, error) {
 
 	for i := range inputs {
 		t := &inputs[i]
-		var dptr *C.float
+		var dptr unsafe.Pointer
 		if len(t.Data) > 0 {
-			dptr = (*C.float)(unsafe.Pointer(&t.Data[0]))
+			dptr = unsafe.Pointer(&t.Data[0])
 		}
 		var sptr *C.longlong
 		if len(t.Shape) > 0 {
 			sptr = (*C.longlong)(unsafe.Pointer(&t.Shape[0]))
 		}
-		rc := C.tvm_input_add(&in, dptr, C.int(len(t.Shape)), sptr, &errbuf[0], 256)
+		rc := C.tvm_input_add(&in, dptr, C.longlong(len(t.Data)), C.uchar(t.Code), C.uchar(t.Bits),
+			C.int(len(t.Shape)), sptr, &errbuf[0], 256)
 		runtime.KeepAlive(t.Data)
 		runtime.KeepAlive(t.Shape)
 		if rc != 0 {
@@ -346,8 +366,8 @@ func (m *Model) Infer(inputs []Tensor) ([]Tensor, error) {
 	var res C.tvm_result_t
 	// Free the output managed tensors even on the error path: in the multi-output
 	// (Array) case tvm_model_run can collect some tensors before failing on a later
-	// one, and it tracks the collected count in res.n (tvm_result_free is a no-op when
-	// res.n == 0). Registering the defer BEFORE the error check plugs that leak.
+	// one, tracking the count in res.n (tvm_result_free is a no-op at res.n == 0), so
+	// the defer has to be registered before the error check.
 	defer C.tvm_result_free(&res)
 	if C.tvm_model_run(&m.c, &in, &res, &errbuf[0], 256) != 0 {
 		return nil, fmt.Errorf("tvm infer: %s", C.GoString(&errbuf[0]))
@@ -361,12 +381,17 @@ func (m *Model) Infer(inputs []Tensor) ([]Tensor, error) {
 		for k := 0; k < nd; k++ {
 			shape[k] = int64(C.tvm_out_dim(&res, C.int(i), C.int(k)))
 		}
-		numel := int(C.tvm_out_numel(&res, C.int(i)))
-		data := make([]float32, numel)
-		if numel > 0 {
-			C.tvm_out_copy(&res, C.int(i), (*C.float)(unsafe.Pointer(&data[0])))
+		nbytes := int(C.tvm_out_nbytes(&res, C.int(i)))
+		data := make([]byte, nbytes)
+		if nbytes > 0 {
+			C.tvm_out_copy(&res, C.int(i), unsafe.Pointer(&data[0]))
 		}
-		outs[i] = Tensor{Shape: shape, Data: data}
+		outs[i] = Tensor{
+			Shape: shape,
+			Code:  uint8(C.tvm_out_dtype_code(&res, C.int(i))),
+			Bits:  uint8(C.tvm_out_dtype_bits(&res, C.int(i))),
+			Data:  data,
+		}
 	}
 	return outs, nil
 }
