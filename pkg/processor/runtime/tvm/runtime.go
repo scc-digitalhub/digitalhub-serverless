@@ -4,11 +4,8 @@ SPDX-FileCopyrightText: © 2025 DSLab - Fondazione Bruno Kessler
 SPDX-License-Identifier: Apache-2.0
 */
 
-// Package tvm is a native Nuclio Go runtime that serves a compiled TVM Relax
-// model.so via the OpenInference v2 protocol. It does the inference IN-PROCESS
-// through cgo (package tvmrelax) — no python wrapper, no subprocess — replicating
-// what the rust tvm-serve does. The openinference trigger handles the v2 wire
-// format and hands each request to ProcessEvent.
+// Package tvm is a native Nuclio Go runtime serving a compiled TVM Relax model.so
+// over OpenInference v2, running inference in-process via cgo (package tvmrelax).
 package tvm
 
 import (
@@ -32,14 +29,12 @@ import (
 
 const defaultModelDir = "/shared/model"
 
-// The TVM Relax VM (and every tvm-ffi handle) is not thread-safe, so we can't call
-// Infer from arbitrary Nuclio worker goroutines. Instead one dedicated goroutine
-// (modelLoop) owns the model and pins itself to a single OS thread; ProcessEvent
-// hands it work over jobCh and waits on respCh. This is the classic actor pattern
-// and mirrors how the rust worker serializes inference on one thread.
+// The Relax VM (and every tvm-ffi handle) is not thread-safe, so one dedicated
+// goroutine (modelLoop) owns the model on a single OS thread; ProcessEvent hands it
+// work over jobCh and waits on respCh (actor pattern, as the rust worker does).
 type inferJob struct {
 	inputs []tvmrelax.Tensor
-	respCh chan inferResult // the caller's private reply channel
+	respCh chan inferResult
 }
 
 type inferResult struct {
@@ -50,7 +45,7 @@ type inferResult struct {
 type tvmRuntime struct {
 	*runtime.AbstractRuntime // supplies every Runtime method except ProcessEvent/ProcessBatch
 	configuration            *runtime.Configuration
-	metadata                 modelMetadata // entry + input/output tensor specs from metadata.json
+	metadata                 modelMetadata
 	jobCh                    chan inferJob // ProcessEvent -> modelLoop
 }
 
@@ -82,8 +77,7 @@ func NewRuntime(parentLogger logger.Logger,
 	if r.metadata.Entry == "" {
 		r.metadata.Entry = "main"
 	}
-	// Fail fast at startup for a model whose declared dtypes this image can't serve
-	// (mirrors the rust worker). Native dtypes are supported; FP16 is deferred.
+	// fail fast if a model declares a dtype this image can't serve (mirrors rust).
 	checkDtype := func(t tensorSpec) error {
 		if t.Dtype != "" && !supportedTvmDtype(t.Dtype) {
 			return errors.Errorf("model tensor %q declares dtype %q: not supported by this serve image (FP16/others deferred)", t.Name, t.Dtype)
@@ -101,8 +95,7 @@ func NewRuntime(parentLogger logger.Logger,
 		}
 	}
 
-	// load + run the model on ONE dedicated OS thread: the Relax VM and every
-	// tvm-ffi handle are not thread-safe (same constraint as the rust worker).
+	// load + run on ONE dedicated OS thread (VM/ffi handles are not thread-safe).
 	ready := make(chan error, 1)
 	go r.modelLoop(modelDir, ready)
 	if err := <-ready; err != nil {
@@ -116,10 +109,8 @@ func NewRuntime(parentLogger logger.Logger,
 	return r, nil
 }
 
-// modelLoop is the actor goroutine: it pins itself to one OS thread, loads the
-// model there, reports the load result on `ready`, then serves inference jobs one
-// at a time from jobCh forever. LockOSThread guarantees every tvm-ffi call for this
-// model happens on the same thread (the ABI requires it).
+// modelLoop pins itself to one OS thread (the ffi ABI requires all calls on the
+// same thread), loads the model, reports on `ready`, then serves jobs one at a time.
 func (r *tvmRuntime) modelLoop(modelDir string, ready chan error) {
 	goruntime.LockOSThread()
 	defer goruntime.UnlockOSThread()
@@ -135,12 +126,11 @@ func (r *tvmRuntime) modelLoop(modelDir string, ready chan error) {
 	}
 }
 
-// ProcessEvent parses an OpenInference v2 infer request, runs TVM inference, and
-// returns the v2 response.
+// ProcessEvent parses a v2 infer request, runs inference, returns the v2 response.
 func (r *tvmRuntime) ProcessEvent(event nuclio.Event,
 	functionLogger logger.Logger) (interface{}, error) {
-	// Decode with UseNumber so integer inputs keep full precision: default JSON
-	// decoding turns every number into a float64, losing bits above 2^53 for INT64.
+	// UseNumber keeps integer precision: plain decoding floats every number, losing
+	// bits above 2^53 for INT64.
 	dec := json.NewDecoder(bytes.NewReader(event.GetBody()))
 	dec.UseNumber()
 	var req openinference.RESTInferenceRequest
@@ -176,14 +166,12 @@ func (r *tvmRuntime) ProcessEvent(event nuclio.Event,
 }
 
 func (r *tvmRuntime) buildInputs(in []openinference.RESTInferInputTensor) ([]tvmrelax.Tensor, error) {
-	// Enforce the model arity up front (the entry call would fail later with an
-	// obscure FFI error otherwise).
+	// enforce arity up front (else the entry call fails later with an obscure FFI error).
 	if len(r.metadata.Inputs) > 0 && len(in) != len(r.metadata.Inputs) {
 		return nil, errors.Errorf("expected %d input tensor(s), got %d", len(r.metadata.Inputs), len(in))
 	}
-	// Name-based matching when possible: the v2 spec identifies tensors by name,
-	// so if every request input is named and the names are exactly the model's
-	// input names, reorder to metadata order; otherwise match positionally.
+	// if every request input is named and the names match the model's, reorder to
+	// metadata order; otherwise match positionally.
 	if len(r.metadata.Inputs) > 0 {
 		byName := make(map[string]int, len(in))
 		named := true
@@ -225,13 +213,9 @@ func (r *tvmRuntime) buildInputs(in []openinference.RESTInferInputTensor) ([]tvm
 		if err != nil {
 			return nil, errors.Wrapf(err, "input %q data", t.Name)
 		}
-		// Guard the FFI copy: tvm_input_add copies product(shape) elements, so a
-		// shape that disagrees with the data length — or overflows int64 — would read
-		// past the packed buffer and crash the worker. Same checks as the rust
-		// worker's validate_shape: reject negative dims, multiply with an overflow
-		// check (a plain product can wrap to a plausible-looking positive), and
-		// require product(shape) == len(nums). Empty shape with empty data is rejected
-		// (product 1 != 0); zero-element shapes like [2,0] pass (product 0).
+		// guard the FFI copy (mirrors rust validate_shape): reject negative dims,
+		// multiply with an overflow check, and require product(shape) == len(nums),
+		// else tvm_input_add reads past the packed buffer and crashes the worker.
 		n := int64(1)
 		for _, d := range t.Shape {
 			if d < 0 {
@@ -254,9 +238,8 @@ func (r *tvmRuntime) buildInputs(in []openinference.RESTInferInputTensor) ([]tvm
 	return out, nil
 }
 
-// buildResponse decodes each output tensor's raw bytes into a typed number array
-// carrying its actual dtype (from the tensor, not the metadata), so a model that
-// returns e.g. INT64 indices reports INT64.
+// buildResponse decodes each output using its actual dtype (from the tensor, not
+// the metadata), so a model returning e.g. INT64 indices reports INT64.
 func (r *tvmRuntime) buildResponse(id string, outs []tvmrelax.Tensor) (openinference.RESTInferenceResponse, error) {
 	resp := openinference.RESTInferenceResponse{ID: id, Outputs: make([]openinference.RESTInferOutputTensor, len(outs))}
 	for i, o := range outs {

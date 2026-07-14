@@ -19,9 +19,8 @@ TVM_HOME="${TVM_HOME:-$HOME/tvm/src/tvm-current}"
 TVM_BUILD="${TVM_BUILD:-$TVM_HOME/build}"
 FFI_INC="$TVM_HOME/3rdparty/tvm-ffi/include"
 DLPACK_INC="$TVM_HOME/3rdparty/tvm-ffi/3rdparty/dlpack/include"
-# Default tag = major.minor of the TVM actually packaged (resolved from the
-# TVM_HOME dir name, e.g. tvm-0.25.0 -> 0.25), so the image tag always matches
-# its contents. Override with TVM_TAG or a full TAG.
+# default tag = major.minor of the packaged TVM (from the TVM_HOME dir name), so the
+# tag always matches its contents. Override with TVM_TAG or a full TAG.
 if [ -z "${TVM_TAG:-}" ]; then
     _v="$(basename "$(readlink -f "$TVM_HOME")")"; _v="${_v#tvm-}"
     if [[ "$_v" =~ ^[0-9]+\.[0-9]+ ]]; then TVM_TAG="${_v%.*}"; else TVM_TAG="0.25"; fi

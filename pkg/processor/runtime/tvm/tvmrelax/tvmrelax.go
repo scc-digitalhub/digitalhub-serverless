@@ -4,32 +4,16 @@ SPDX-FileCopyrightText: © 2025 DSLab - Fondazione Bruno Kessler
 SPDX-License-Identifier: Apache-2.0
 */
 
-// Package tvmrelax is a native cgo binding that loads a compiled TVM Relax
-// model.so and runs inference. It reproduces, in Go plus a little C glue, exactly
-// what the rust `tvm-relax` crate does: TVM ships no high-level Relax-VM binding,
-// so the model is driven through raw PackedFunc calls over TVM's tvm-ffi C ABI.
-//
-// The load + run dance is just five calls:
-//
-//	lib   = ffi.ModuleLoadFromFile("model.so")  // load the .so as a TVM Module
-//	vm    = lib["vm_load_executable"]()         // -> the Relax VirtualMachine
-//	        vm["vm_initialization"](CPU, CPU)    // init compute + host device (both CPU)
-//	entry = vm[<entry>]                         // resolve the entry fn (usually "main")
-//	out   = entry(inputs...)                    // run -> a Tensor or an Array<Tensor>
-//
-// All the fiddly ABI work (packing TVMFFIAny arguments, wrapping buffers as
-// DLTensors, reference counting) is kept in the C helpers below, so the Go side
-// only ever exchanges raw little-endian bytes + a DLPack dtype (code, bits) +
-// shapes. CPU only; the native dtypes are supported (FP16 is deferred).
+// Package tvmrelax is a cgo binding that loads a compiled TVM Relax model.so and
+// runs inference, driving it through raw PackedFunc calls over TVM's tvm-ffi C ABI
+// (TVM ships no high-level Relax-VM binding). Mirrors the rust `tvm-relax` crate.
+// The Go side only exchanges raw little-endian bytes + a DLPack dtype (code, bits)
+// + shapes; the C helpers below do the ABI work. CPU only; FP16 deferred.
 //
 // NOT thread-safe: the VM and every tvm-ffi handle must be used from ONE OS thread.
-// The caller pins a dedicated goroutine for Load+Infer (see the runtime's modelLoop).
 //
-// Build: needs the tvm-ffi/dlpack headers and libtvm_ffi.so + libtvm_runtime.so;
-// supply the paths via CGO_CFLAGS / CGO_LDFLAGS, e.g.
-//
-//	CGO_CFLAGS="-I<tvm>/3rdparty/tvm-ffi/include -I<tvm>/3rdparty/tvm-ffi/3rdparty/dlpack/include"
-//	CGO_LDFLAGS="-L<tvm>/build/lib -Wl,-rpath,/opt/tvm/lib"
+// Build needs the tvm-ffi/dlpack headers and libtvm_ffi.so + libtvm_runtime.so,
+// supplied via CGO_CFLAGS / CGO_LDFLAGS.
 package tvmrelax
 
 /*
@@ -42,17 +26,10 @@ package tvmrelax
 
 #define TVM_MAX_OUT 64
 
-// --- tvm-ffi ABI in one paragraph ---
-// Everything (modules, functions, tensors, arrays) is a reference-counted
-// TVMFFIObjectHandle. You invoke anything with TVMFFIFunctionCall(fn, args, n, &ret),
-// where each arg and the result are a TVMFFIAny: a 16-byte tagged union
-// {type_index, value}. A call returns an OWNED handle in ret.v_obj, so we must
-// TVMFFIObjectDecRef() it once we are done. Named globals (e.g. "ffi.ModuleLoadFromFile")
-// are resolved once via TVMFFIFunctionGetGlobal. Tensors cross the boundary as DLPack
-// DLManagedTensors (TVMFFITensorFromDLPack in, TVMFFITensorToDLPack out).
-
-// A loaded model: the DSO module, the Relax VM built from it, the cached entry
-// function, plus the ffi globals we reuse per call. All must outlive inference.
+// tvm-ffi ABI: everything is a refcounted TVMFFIObjectHandle, invoked via
+// TVMFFIFunctionCall(fn, args, n, &ret) where each arg/result is a TVMFFIAny tagged
+// union. A call returns an OWNED handle in ret.v_obj that must be DecRef'd. Tensors
+// cross as DLPack DLManagedTensors (TensorFromDLPack in, TensorToDLPack out).
 typedef struct {
   TVMFFIObjectHandle lib;
   TVMFFIObjectHandle vm;
@@ -80,15 +57,12 @@ static void tvm_dl_free(struct DLManagedTensor* self) {
   free(self);
 }
 
-// pull the last raised tvm-ffi error into buf, prefixed by ctx. The error object
-// carries the real message in its TVMFFIErrorCell; fall back to a generic label
-// only when no error was raised or it has no message.
+// pull the last raised tvm-ffi error into buf, prefixed by ctx.
 static void tvm_take_error(const char* ctx, char* buf, int cap) {
   TVMFFIObjectHandle err = NULL;
   TVMFFIErrorMoveFromRaised(&err);
   if (err) {
-    // C equivalent of the C++-only inline TVMFFIErrorGetCellPtr: the error cell
-    // sits immediately after the TVMFFIObject header.
+    // C equivalent of the C++-only TVMFFIErrorGetCellPtr: cell sits right after the header.
     TVMFFIErrorCell* cell = (TVMFFIErrorCell*)((char*)err + sizeof(TVMFFIObject));
     if (cell->message.data && cell->message.size > 0) {
       snprintf(buf, cap, "%s: %.*s", ctx, (int)cell->message.size, cell->message.data);
@@ -100,9 +74,7 @@ static void tvm_take_error(const char* ctx, char* buf, int cap) {
   snprintf(buf, cap, "%s: tvm-ffi call failed", ctx);
 }
 
-// Accept only the native dtypes this image can serve (scalar lanes; float 32/64,
-// int/uint 8/16/32/64). FP16 and others are deferred: reject with a clear error
-// rather than copying raw bytes the Go side can't interpret.
+// accept only serveable dtypes (lanes==1; float 32/64, int/uint 8/16/32/64); FP16 deferred.
 static int tvm_check_out_supported(tvm_result_t* res, int i, char* err, int cap) {
   DLDataType dt = res->outs[i]->dl_tensor.dtype;
   int ok = dt.lanes == 1 && (
@@ -179,10 +151,8 @@ static int tvm_model_load(const char* so_path, const char* entry,
   return 0;
 }
 
-// add one input by COPYING data+shape into C memory wrapped as an ffi.Tensor (so
-// Go memory need not outlive the call). `data` is `nbytes` of raw little-endian
-// bytes of the tensor's dtype (code, bits); the Go side has already packed the
-// numbers, so this path is the same for every dtype.
+// add one input by COPYING data+shape into C memory (so Go memory need not outlive
+// the call). `data` is nbytes of raw LE bytes of the tensor's dtype (code, bits).
 static int tvm_input_add(tvm_inputs_t* in, const void* data, long long nbytes,
                          unsigned char code, unsigned char bits, int ndim,
                          const long long* shape, char* err, int cap) {
@@ -276,9 +246,7 @@ static long long tvm_out_nbytes(tvm_result_t* res, int i) {
   for (int k = 0; k < t->ndim; k++) n *= t->shape[k];
   return n * (long long)((t->dtype.bits + 7) / 8);
 }
-// copy the output's raw little-endian bytes; nbytes is the size the caller got
-// from tvm_out_nbytes (and used to allocate dst). The Go side decodes them into
-// a typed slice.
+// copy the output's raw LE bytes into dst (sized by the caller via tvm_out_nbytes).
 static void tvm_out_copy(tvm_result_t* res, int i, void* dst, long long nbytes) {
   if (nbytes > 0) memcpy(dst, res->outs[i]->dl_tensor.data, (size_t)nbytes);
 }
@@ -299,12 +267,9 @@ import (
 	"unsafe"
 )
 
-// Tensor is a CPU tensor (row-major contiguous). Data holds the raw
-// little-endian element bytes for the DLPack dtype (Code, Bits) — e.g.
-// (kDLFloat, 32) for FP32, (kDLInt, 64) for INT64 — so any native dtype crosses
-// the cgo boundary the same way. Tensors are positional (no names cross this
-// boundary); the v2 datatype <-> (code, bits) mapping lives in the caller
-// (package tvm) to keep this binding dtype-agnostic.
+// Tensor is a CPU tensor (row-major). Data holds raw LE element bytes for the DLPack
+// dtype (Code, Bits), so any dtype crosses the cgo boundary the same way. Positional
+// (no names cross here); the v2 <-> (code, bits) mapping lives in package tvm.
 type Tensor struct {
 	Shape []int64
 	Code  uint8
@@ -362,10 +327,8 @@ func (m *Model) Infer(inputs []Tensor) ([]Tensor, error) {
 	}
 
 	var res C.tvm_result_t
-	// Free the output managed tensors even on the error path: in the multi-output
-	// (Array) case tvm_model_run can collect some tensors before failing on a later
-	// one, tracking the count in res.n (tvm_result_free is a no-op at res.n == 0), so
-	// the defer has to be registered before the error check.
+	// free outputs even on the error path: the multi-output case can collect some
+	// tensors (tracked in res.n) before failing, so defer before the error check.
 	defer C.tvm_result_free(&res)
 	if C.tvm_model_run(&m.c, &in, &res, &errbuf[0], 256) != 0 {
 		return nil, fmt.Errorf("tvm infer: %s", C.GoString(&errbuf[0]))

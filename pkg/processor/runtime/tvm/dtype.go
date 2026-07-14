@@ -20,17 +20,14 @@ const (
 	dlFloat = 2
 )
 
-// dtypeInfo describes one supported dtype: its DLPack (code, bits) pair and the
-// TVM dtype string used in metadata.json (e.g. "float32").
+// dtypeInfo: DLPack (code, bits) + the metadata.json TVM dtype name (e.g. "float32").
 type dtypeInfo struct {
 	code, bits uint8
 	tvmName    string
 }
 
-// dtypeTable is the single source of truth for the native dtypes this serve
-// image supports, keyed by the Open Inference v2 datatype name; every mapping
-// and codec below derives from it. FP16/BOOL are deferred and rejected
-// (mirrors the rust worker).
+// dtypeTable is the source of truth for supported native dtypes, keyed by v2
+// datatype name; every mapping below derives from it. FP16/BOOL deferred (mirrors rust).
 var dtypeTable = map[string]dtypeInfo{
 	"FP32":   {dlFloat, 32, "float32"},
 	"FP64":   {dlFloat, 64, "float64"},
@@ -44,8 +41,7 @@ var dtypeTable = map[string]dtypeInfo{
 	"UINT64": {dlUInt, 64, "uint64"},
 }
 
-// lookups derived from dtypeTable: the metadata.json TVM dtype names, and the
-// reverse (code, bits) -> v2 datatype map.
+// derived from dtypeTable: TVM dtype names, and the reverse (code, bits) -> v2 map.
 var (
 	tvmDtypeNames = func() map[string]bool {
 		m := make(map[string]bool, len(dtypeTable))
@@ -63,9 +59,7 @@ var (
 	}()
 )
 
-// v2ToDLPack maps an Open Inference v2 datatype to a DLPack (code, bits) pair.
-// Only the native dtypes this serve image supports are accepted; FP16/BOOL are
-// deferred and rejected here (mirrors the rust worker).
+// v2ToDLPack maps a v2 datatype to a DLPack (code, bits) pair; FP16/BOOL deferred.
 func v2ToDLPack(datatype string) (code, bits uint8, err error) {
 	if datatype == "FP16" {
 		return 0, 0, fmt.Errorf("datatype 'FP16' is not supported by this serve image (deferred)")
@@ -77,8 +71,7 @@ func v2ToDLPack(datatype string) (code, bits uint8, err error) {
 	return info.code, info.bits, nil
 }
 
-// supportedTvmDtype reports whether a metadata.json TVM dtype string (e.g.
-// "float32", "int64") is a native dtype this serve image can handle.
+// supportedTvmDtype reports whether a metadata.json TVM dtype name is serveable.
 func supportedTvmDtype(dt string) bool {
 	return tvmDtypeNames[dt]
 }
@@ -91,9 +84,8 @@ func dlpackToV2(code, bits int) (string, error) {
 	return "", fmt.Errorf("unsupported output dtype (code=%d bits=%d); FP16/others deferred", code, bits)
 }
 
-// collectNumbers flattens a JSON-decoded numeric tensor payload (flat or nested
-// arrays) into a flat slice of json.Number, preserving integer precision (the
-// request is decoded with UseNumber). float64 leaves are accepted as a fallback.
+// collectNumbers flattens a JSON-decoded tensor payload (flat or nested) into a
+// flat []json.Number, preserving integer precision (request decoded with UseNumber).
 func collectNumbers(v any) ([]json.Number, error) {
 	var out []json.Number
 	var rec func(any) error
@@ -133,12 +125,9 @@ func numUint64(n json.Number) (uint64, error) {
 	return uint64(f), nil
 }
 
-// encodeInputBytes encodes flattened numbers into raw little-endian bytes for the
-// given v2 datatype, ready to memcpy into a DLTensor of that dtype. Integer types
-// read the JSON integer directly so INT64 keeps full precision. Every element is
-// funneled through its uint64 bit pattern and the low bits/8 bytes are written
-// little-endian: two's-complement truncation makes that identical to the
-// per-dtype casts (e.g. byte(int8(v)) == low byte of uint64(v)).
+// encodeInputBytes packs numbers into raw little-endian bytes for the v2 datatype.
+// Each element goes through its uint64 bit pattern, low bits/8 bytes written LE:
+// two's-complement truncation makes that identical to the per-dtype casts.
 func encodeInputBytes(nums []json.Number, datatype string) ([]byte, error) {
 	info, ok := dtypeTable[datatype]
 	if !ok {
@@ -180,8 +169,7 @@ func encodeInputBytes(nums []json.Number, datatype string) ([]byte, error) {
 	return b, nil
 }
 
-// decodeLE decodes raw little-endian bytes into a typed slice, reading `width`
-// bytes per element into a uint64 bit pattern that conv turns into the value.
+// decodeLE reads `width` LE bytes per element into a uint64 that conv turns into T.
 func decodeLE[T any](b []byte, width int, conv func(uint64) T) []T {
 	out := make([]T, len(b)/width)
 	for i := range out {
@@ -194,9 +182,8 @@ func decodeLE[T any](b []byte, width int, conv func(uint64) T) []T {
 	return out
 }
 
-// decodeOutputData decodes raw little-endian bytes of the given v2 datatype into a
-// typed slice that json.Marshal renders as an array of numbers. UINT8 uses []int
-// (not []uint8/[]byte, which json would base64-encode).
+// decodeOutputData decodes raw LE bytes of the v2 datatype into a typed slice.
+// UINT8 uses []int (not []uint8/[]byte, which json would base64-encode).
 func decodeOutputData(b []byte, datatype string) (any, error) {
 	switch datatype {
 	case "FP32":

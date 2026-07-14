@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
-# Generate the Nuclio processor config from env, then run the processor. The
-# native `tvm` runtime loads the model from TVM_MODEL_DIR; the openinference
-# trigger exposes OpenInference v2 on the configured ports.
+# Generate the Nuclio processor config from env, then run the processor.
 set -euo pipefail
 
 CFG=/tmp/processor.yaml
 MODEL_DIR="${TVM_MODEL_DIR:-/shared/model}"
 
-# Populate the v2 metadata endpoints (/v2/models/<name>, gRPC ModelMetadata) from
-# the model's metadata.json: the trigger serves input_tensors/output_tensors from
-# its config only, so without this clients would see empty inputs/outputs.
-# YAML is a JSON superset, so compact JSON arrays can be embedded directly.
+# Populate the v2 metadata endpoints from metadata.json: the trigger serves
+# input_tensors/output_tensors from config only, else clients see empty inputs/outputs.
+# YAML is a JSON superset, so compact JSON arrays embed directly.
 IN_T="[]"; OUT_T="[]"
 if command -v jq >/dev/null 2>&1 && [ -f "$MODEL_DIR/metadata.json" ]; then
     DT_MAP='{"float32":"FP32","float64":"FP64","float16":"FP16","int64":"INT64","int32":"INT32","int16":"INT16","int8":"INT8","uint8":"UINT8","uint16":"UINT16","uint32":"UINT32","uint64":"UINT64","bool":"BOOL"}'

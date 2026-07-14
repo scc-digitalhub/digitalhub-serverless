@@ -1,14 +1,8 @@
-# Native Go TVM serving image: a Nuclio processor with the compiled-in `tvm`
-# runtime (cgo -> libtvm_ffi/libtvm_runtime). Loads $TVM_MODEL_DIR/model.so +
-# metadata.json and serves OpenInference v2 (REST 8080 / gRPC 9000). No python
-# wrapper. The .so Model is downloaded into TVM_MODEL_DIR by an init container.
-#
-# Build context is assembled by images/tvm/build.sh:
-#   tvm-include/{tvm-ffi,dlpack}  TVM cgo headers
-#   tvm-lib/{libtvm_ffi,libtvm_runtime}.so
-#   src/                          digitalhub-serverless source
+# Nuclio processor with the compiled-in `tvm` runtime (cgo -> libtvm_ffi/libtvm_runtime);
+# serves OpenInference v2. Build context is assembled by images/tvm/build.sh
+# (tvm-include/ headers, tvm-lib/ .so, src/ source).
 
-# ---- build: golang + cgo linked against TVM ----
+# build: golang + cgo linked against TVM
 FROM golang:1.25 AS build
 COPY tvm-include /opt/tvm/include
 COPY tvm-lib /opt/tvm/lib
@@ -19,7 +13,7 @@ ENV CGO_ENABLED=1 \
     CGO_LDFLAGS="-L/opt/tvm/lib -Wl,-rpath,/opt/tvm/lib"
 RUN go build -o /out/processor ./cmd/processor/main.go
 
-# ---- runtime: ubuntu + TVM runtime libs + processor ----
+# runtime: ubuntu + TVM runtime libs + processor
 FROM ubuntu:24.04
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libstdc++6 ca-certificates jq \

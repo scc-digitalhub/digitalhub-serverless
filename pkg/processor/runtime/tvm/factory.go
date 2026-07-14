@@ -18,8 +18,7 @@ func (f *factory) Create(parentLogger logger.Logger,
 	return NewRuntime(parentLogger.GetChild("tvm"), configuration)
 }
 
-// register the native "tvm" runtime kind. The blank-import in
-// cmd/processor/app/processor.go triggers this init().
+// registered via the blank-import in cmd/processor/app/processor.go.
 func init() {
 	runtime.RegistrySingleton.Register("tvm", &factory{})
 }
