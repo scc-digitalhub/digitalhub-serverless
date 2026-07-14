@@ -35,7 +35,7 @@ TVM directly. Registration is the standard Nuclio factory pattern:
 | Blank import | `cmd/processor/app/processor.go` | `_ ".../runtime/tvm"` fires the `init()` (alongside the stock runtimes). The `openinference` **trigger** is blank-imported the same way. |
 | Runtime impl | `runtime.go` | `tvmRuntime` embeds `*runtime.AbstractRuntime` and overrides `ProcessEvent` / `ProcessBatch` |
 | cgo binding | `tvmrelax/tvmrelax.go` | loads `model.so`, drives the Relax VM over the tvm-ffi C ABI |
-| Wire types | `types.go` | `metadata.json` shape + OpenInference v2 request/response structs |
+| Wire types | `types.go` | `metadata.json` shape; the OpenInference v2 request/response structs are the `openinference` trigger's exported `RESTInference*` types |
 
 ```
 processor.go (blank imports)
@@ -70,7 +70,7 @@ it forwards the job to a dedicated actor goroutine (`modelLoop`) and waits.
         │  v2 infer request JSON
         ▼
  openinference trigger ──► worker ──► tvmRuntime.ProcessEvent(event)
-        │  json.Unmarshal → v2Request
+        │  json.Unmarshal → RESTInferenceRequest
         │  buildInputs()  → []tvmrelax.Tensor   (dtype validate + encode bytes)
         │
         │  jobCh <- inferJob{inputs, respCh}         ┌─────────────────────────┐
@@ -79,7 +79,8 @@ it forwards the job to a dedicated actor goroutine (`modelLoop`) and waits.
         │                                            │  model.Infer(inputs)    │
         │            res := <-respCh                 │   → tvmrelax cgo → TVM   │
         │◄───────────────────────────────────────────┤  respCh <- outputs      │
-        │  buildResponse(id, outputs) → v2Response    └─────────────────────────┘
+        │  buildResponse(id, outputs)                 └─────────────────────────┘
+        │      → RESTInferenceResponse
         │  json.Marshal
         ▼
  nuclio.Response{200, application/json, body}

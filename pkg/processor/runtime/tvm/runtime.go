@@ -27,6 +27,7 @@ import (
 	"github.com/nuclio/nuclio/pkg/processor/runtime"
 
 	"github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/runtime/tvm/tvmrelax"
+	"github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/trigger/openinference"
 )
 
 const defaultModelDir = "/shared/model"
@@ -142,7 +143,7 @@ func (r *tvmRuntime) ProcessEvent(event nuclio.Event,
 	// decoding turns every number into a float64, losing bits above 2^53 for INT64.
 	dec := json.NewDecoder(bytes.NewReader(event.GetBody()))
 	dec.UseNumber()
-	var req v2Request
+	var req openinference.RESTInferenceRequest
 	if err := dec.Decode(&req); err != nil {
 		return nil, errors.Wrap(err, "invalid inference request")
 	}
@@ -174,7 +175,7 @@ func (r *tvmRuntime) ProcessEvent(event nuclio.Event,
 	}, nil
 }
 
-func (r *tvmRuntime) buildInputs(in []v2InputTensor) ([]tvmrelax.Tensor, error) {
+func (r *tvmRuntime) buildInputs(in []openinference.RESTInferInputTensor) ([]tvmrelax.Tensor, error) {
 	// Enforce the model arity up front (the entry call would fail later with an
 	// obscure FFI error otherwise).
 	if len(r.metadata.Inputs) > 0 && len(in) != len(r.metadata.Inputs) {
@@ -194,7 +195,7 @@ func (r *tvmRuntime) buildInputs(in []v2InputTensor) ([]tvmrelax.Tensor, error) 
 			byName[in[i].Name] = i
 		}
 		if named && len(byName) == len(r.metadata.Inputs) {
-			reordered := make([]v2InputTensor, 0, len(in))
+			reordered := make([]openinference.RESTInferInputTensor, 0, len(in))
 			ok := true
 			for _, spec := range r.metadata.Inputs {
 				idx, found := byName[spec.Name]
@@ -248,7 +249,7 @@ func (r *tvmRuntime) buildInputs(in []v2InputTensor) ([]tvmrelax.Tensor, error) 
 		if err != nil {
 			return nil, errors.Wrapf(err, "input %q", t.Name)
 		}
-		out = append(out, tvmrelax.Tensor{Name: t.Name, Shape: t.Shape, Code: code, Bits: bits, Data: raw})
+		out = append(out, tvmrelax.Tensor{Shape: t.Shape, Code: code, Bits: bits, Data: raw})
 	}
 	return out, nil
 }
@@ -256,8 +257,8 @@ func (r *tvmRuntime) buildInputs(in []v2InputTensor) ([]tvmrelax.Tensor, error) 
 // buildResponse decodes each output tensor's raw bytes into a typed number array
 // carrying its actual dtype (from the tensor, not the metadata), so a model that
 // returns e.g. INT64 indices reports INT64.
-func (r *tvmRuntime) buildResponse(id string, outs []tvmrelax.Tensor) (v2Response, error) {
-	resp := v2Response{ID: id, Outputs: make([]v2OutputTensor, len(outs))}
+func (r *tvmRuntime) buildResponse(id string, outs []tvmrelax.Tensor) (openinference.RESTInferenceResponse, error) {
+	resp := openinference.RESTInferenceResponse{ID: id, Outputs: make([]openinference.RESTInferOutputTensor, len(outs))}
 	for i, o := range outs {
 		name := fmt.Sprintf("output_%d", i)
 		if i < len(r.metadata.Outputs) && r.metadata.Outputs[i].Name != "" {
@@ -265,13 +266,13 @@ func (r *tvmRuntime) buildResponse(id string, outs []tvmrelax.Tensor) (v2Respons
 		}
 		datatype, err := dlpackToV2(int(o.Code), int(o.Bits))
 		if err != nil {
-			return v2Response{}, errors.Wrapf(err, "output %q", name)
+			return openinference.RESTInferenceResponse{}, errors.Wrapf(err, "output %q", name)
 		}
 		data, err := decodeOutputData(o.Data, datatype)
 		if err != nil {
-			return v2Response{}, errors.Wrapf(err, "output %q", name)
+			return openinference.RESTInferenceResponse{}, errors.Wrapf(err, "output %q", name)
 		}
-		resp.Outputs[i] = v2OutputTensor{
+		resp.Outputs[i] = openinference.RESTInferOutputTensor{
 			Name:     name,
 			Shape:    o.Shape,
 			Datatype: datatype,

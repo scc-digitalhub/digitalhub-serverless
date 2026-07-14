@@ -276,13 +276,11 @@ static long long tvm_out_nbytes(tvm_result_t* res, int i) {
   for (int k = 0; k < t->ndim; k++) n *= t->shape[k];
   return n * (long long)((t->dtype.bits + 7) / 8);
 }
-// copy the output's raw little-endian bytes (element size from its dtype); the Go
-// side decodes them into a typed slice.
-static void tvm_out_copy(tvm_result_t* res, int i, void* dst) {
-  DLTensor* t = &res->outs[i]->dl_tensor; long long n = 1;
-  for (int k = 0; k < t->ndim; k++) n *= t->shape[k];
-  long long nbytes = n * (long long)((t->dtype.bits + 7) / 8);
-  if (nbytes > 0) memcpy(dst, t->data, (size_t)nbytes);
+// copy the output's raw little-endian bytes; nbytes is the size the caller got
+// from tvm_out_nbytes (and used to allocate dst). The Go side decodes them into
+// a typed slice.
+static void tvm_out_copy(tvm_result_t* res, int i, void* dst, long long nbytes) {
+  if (nbytes > 0) memcpy(dst, res->outs[i]->dl_tensor.data, (size_t)nbytes);
 }
 static void tvm_result_free(tvm_result_t* res) {
   for (int i = 0; i < res->n; i++) {
@@ -301,13 +299,13 @@ import (
 	"unsafe"
 )
 
-// Tensor is a CPU named tensor (row-major contiguous). Data holds the raw
+// Tensor is a CPU tensor (row-major contiguous). Data holds the raw
 // little-endian element bytes for the DLPack dtype (Code, Bits) — e.g.
 // (kDLFloat, 32) for FP32, (kDLInt, 64) for INT64 — so any native dtype crosses
-// the cgo boundary the same way. The v2 datatype <-> (code, bits) mapping lives
-// in the caller (package tvm) to keep this binding dtype-agnostic.
+// the cgo boundary the same way. Tensors are positional (no names cross this
+// boundary); the v2 datatype <-> (code, bits) mapping lives in the caller
+// (package tvm) to keep this binding dtype-agnostic.
 type Tensor struct {
-	Name  string
 	Shape []int64
 	Code  uint8
 	Bits  uint8
@@ -384,7 +382,7 @@ func (m *Model) Infer(inputs []Tensor) ([]Tensor, error) {
 		nbytes := int(C.tvm_out_nbytes(&res, C.int(i)))
 		data := make([]byte, nbytes)
 		if nbytes > 0 {
-			C.tvm_out_copy(&res, C.int(i), unsafe.Pointer(&data[0]))
+			C.tvm_out_copy(&res, C.int(i), unsafe.Pointer(&data[0]), C.longlong(nbytes))
 		}
 		outs[i] = Tensor{
 			Shape: shape,
