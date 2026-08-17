@@ -130,6 +130,9 @@ type RESTTensorMetadata struct {
 	Name     string  `json:"name"`
 	Datatype string  `json:"datatype"`
 	Shape    []int64 `json:"shape"`
+	// Quantization params for int8/uint8 models, in the v2 `parameters` map.
+	// Omitted for float models, so their response stays exactly as before.
+	Parameters map[string]any `json:"parameters,omitempty"`
 }
 
 type ServerLiveResponse struct {
@@ -221,23 +224,46 @@ func (oi *openInference) handleServerMetadata(w http.ResponseWriter, r *http.Req
 	oi.writeJSONResponse(w, http.StatusOK, response)
 }
 
-func (oi *openInference) handleModelMetadata(w http.ResponseWriter, _ *http.Request) {
-	inputs := make([]RESTTensorMetadata, len(oi.configuration.InputTensors))
-	for i, tensor := range oi.configuration.InputTensors {
-		inputs[i] = RESTTensorMetadata{
-			Name:     tensor.Name,
-			Datatype: tensor.DataType,
-			Shape:    tensor.Shape,
+// modelTensors returns the signature to advertise: the model's own, when the runtime
+// can report it, otherwise the one declared in the function config. Runtimes that do
+// not implement TensorMetadataProvider therefore behave exactly as before.
+func (oi *openInference) modelTensors() (inputs, outputs []TensorDef) {
+	if oi.WorkerAllocator != nil {
+		for _, w := range oi.WorkerAllocator.GetWorkers() {
+			provider, ok := w.GetRuntime().(TensorMetadataProvider)
+			if !ok {
+				continue
+			}
+			if in, out := provider.ModelTensors(); len(in) > 0 || len(out) > 0 {
+				return in, out
+			}
 		}
 	}
+	return oi.configuration.InputTensors, oi.configuration.OutputTensors
+}
 
-	outputs := make([]RESTTensorMetadata, len(oi.configuration.OutputTensors))
-	for i, tensor := range oi.configuration.OutputTensors {
-		outputs[i] = RESTTensorMetadata{
-			Name:     tensor.Name,
-			Datatype: tensor.DataType,
-			Shape:    tensor.Shape,
+func toRESTTensorMetadata(t TensorDef) RESTTensorMetadata {
+	m := RESTTensorMetadata{Name: t.Name, Datatype: t.DataType, Shape: t.Shape}
+	if len(t.Scale) > 0 {
+		m.Parameters = map[string]any{"scale": t.Scale, "zero_point": t.ZeroPoint}
+		if t.QuantizedDimension != 0 {
+			m.Parameters["quantized_dimension"] = t.QuantizedDimension
 		}
+	}
+	return m
+}
+
+func (oi *openInference) handleModelMetadata(w http.ResponseWriter, _ *http.Request) {
+	inputTensors, outputTensors := oi.modelTensors()
+
+	inputs := make([]RESTTensorMetadata, len(inputTensors))
+	for i, tensor := range inputTensors {
+		inputs[i] = toRESTTensorMetadata(tensor)
+	}
+
+	outputs := make([]RESTTensorMetadata, len(outputTensors))
+	for i, tensor := range outputTensors {
+		outputs[i] = toRESTTensorMetadata(tensor)
 	}
 
 	response := ModelMetadataResponse{

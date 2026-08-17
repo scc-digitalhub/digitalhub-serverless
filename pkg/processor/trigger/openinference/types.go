@@ -26,6 +26,21 @@ type TensorDef struct {
 	Name     string  `mapstructure:"name"`
 	DataType string  `mapstructure:"datatype"`
 	Shape    []int64 `mapstructure:"shape"`
+	// Affine quantization params, for quantized models (int8/uint8): a client
+	// receiving int8 cannot map the values back to reals without them. Per-axis
+	// quantization yields more than one entry, indexed by QuantizedDimension.
+	Scale              []float64 `mapstructure:"scale"`
+	ZeroPoint          []int64   `mapstructure:"zero_point"`
+	QuantizedDimension int64     `mapstructure:"quantized_dimension"`
+}
+
+// TensorMetadataProvider is implemented by runtimes that know their model's own
+// signature (the TVM runtime reads it from metadata.json). The trigger prefers it
+// over the tensors declared in the function config, so a function does not have to
+// repeat — and risk contradicting — what the model already states. Runtimes that do
+// not implement it keep the previous behaviour.
+type TensorMetadataProvider interface {
+	ModelTensors() (inputs, outputs []TensorDef)
 }
 
 // Configuration for OpenInference trigger

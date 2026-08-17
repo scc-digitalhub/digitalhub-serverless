@@ -229,6 +229,16 @@ triggers:
     maxWorkers: 4
 ```
 
+**Model signature.** The tensors above are what the trigger advertises on
+`GET /v2/models/<name>` and `ModelMetadata`. A runtime that knows its model's own
+signature can supply it instead, by implementing `TensorMetadataProvider`
+(`ModelTensors() (inputs, outputs []TensorDef)`); the trigger prefers it and falls back
+to this configuration otherwise, so runtimes that do not implement it are unaffected.
+The `tvm` runtime does implement it, reading `metadata.json` next to `model.so` — which
+is also how the quantization params of an int8 model reach the client without anyone
+declaring them by hand. Note the gRPC `ModelMetadata` cannot carry those params: the
+generated v2 proto has no `parameters` field on `TensorMetadata`.
+
 **Configuration Parameters:**
 
 - `model_name` - Name of the model being served (required)
@@ -237,7 +247,9 @@ triggers:
 - `grpc_port` - TCP port for gRPC service (default: 9000)
 - `enable_rest` - Enable REST API endpoints (default: true)
 - `enable_grpc` - Enable gRPC service (default: true)
-- `input_tensors` - Array of input tensor definitions with name, datatype, and shape
+- `input_tensors` - Array of input tensor definitions with name, datatype, and shape.
+  Quantized models may add `scale`, `zero_point` and `quantized_dimension`, published to
+  clients under the v2 `parameters` map — see *Model signature* below.
 - `output_tensors` - Array of output tensor definitions with name, datatype, and shape
 
 **Supported Data Types:**

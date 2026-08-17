@@ -57,6 +57,14 @@ var (
 		}
 		return m
 	}()
+	// metadata.json states TVM dtype names ("int8"); the v2 wire wants "INT8".
+	tvmToV2Name = func() map[string]string {
+		m := make(map[string]string, len(dtypeTable))
+		for name, info := range dtypeTable {
+			m[info.tvmName] = name
+		}
+		return m
+	}()
 )
 
 // v2ToDLPack maps a v2 datatype to a DLPack (code, bits) pair; FP16/BOOL deferred.

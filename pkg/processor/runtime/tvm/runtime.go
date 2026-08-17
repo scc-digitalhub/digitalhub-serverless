@@ -109,6 +109,30 @@ func NewRuntime(parentLogger logger.Logger,
 	return r, nil
 }
 
+// ModelTensors reports the signature the model itself declares in metadata.json, read
+// at construction (so it is always populated by the time a worker exists). The
+// openinference trigger advertises this instead of the tensors declared in the
+// function config, which otherwise have to repeat — and can contradict — the model.
+// Implements openinference.TensorMetadataProvider.
+func (r *tvmRuntime) ModelTensors() (inputs, outputs []openinference.TensorDef) {
+	return toTensorDefs(r.metadata.Inputs), toTensorDefs(r.metadata.Outputs)
+}
+
+func toTensorDefs(specs []tensorSpec) []openinference.TensorDef {
+	defs := make([]openinference.TensorDef, 0, len(specs))
+	for _, s := range specs {
+		defs = append(defs, openinference.TensorDef{
+			Name:               s.Name,
+			DataType:           tvmToV2Name[s.Dtype],
+			Shape:              s.Shape,
+			Scale:              s.Scale,
+			ZeroPoint:          s.ZeroPoint,
+			QuantizedDimension: s.QuantizedDimension,
+		})
+	}
+	return defs
+}
+
 // modelLoop pins itself to one OS thread (the ffi ABI requires all calls on the
 // same thread), loads the model, reports on `ready`, then serves jobs one at a time.
 func (r *tvmRuntime) modelLoop(modelDir string, ready chan error) {

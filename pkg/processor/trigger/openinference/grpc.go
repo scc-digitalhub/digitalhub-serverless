@@ -77,9 +77,14 @@ func (s *grpcInferenceServer) ServerMetadata(ctx context.Context, req *pb.Server
 
 // ModelMetadata - Get model metadata
 func (s *grpcInferenceServer) ModelMetadata(ctx context.Context, req *pb.ModelMetadataRequest) (*pb.ModelMetadataResponse, error) {
+	// Same source as REST: the model's own signature when the runtime reports it.
+	// The v2 proto generated here has no `parameters` field on TensorMetadata, so
+	// quantization params stay REST-only for now
+	inputTensors, outputTensors := s.trigger.modelTensors()
+
 	// Convert input tensor definitions to metadata
-	inputs := make([]*pb.TensorMetadata, len(s.trigger.configuration.InputTensors))
-	for i, tensor := range s.trigger.configuration.InputTensors {
+	inputs := make([]*pb.TensorMetadata, len(inputTensors))
+	for i, tensor := range inputTensors {
 		inputs[i] = &pb.TensorMetadata{
 			Name:     tensor.Name,
 			Datatype: tensor.DataType,
@@ -88,8 +93,8 @@ func (s *grpcInferenceServer) ModelMetadata(ctx context.Context, req *pb.ModelMe
 	}
 
 	// Convert output tensor definitions to metadata
-	outputs := make([]*pb.TensorMetadata, len(s.trigger.configuration.OutputTensors))
-	for i, tensor := range s.trigger.configuration.OutputTensors {
+	outputs := make([]*pb.TensorMetadata, len(outputTensors))
+	for i, tensor := range outputTensors {
 		outputs[i] = &pb.TensorMetadata{
 			Name:     tensor.Name,
 			Datatype: tensor.DataType,
