@@ -141,7 +141,7 @@ A last job publishes the multi-architecture tag.
 ## Development
 
 Tests and builds need the headers and libraries of a local build of the same Apache TVM
-release (for example with `build-tvm.sh` of the DigitalHub TVM Toolkit):
+release:
 
 ```bash
 TVM=~/tvm/src/tvm-0.26.0
@@ -155,15 +155,6 @@ go test ./pkg/processor/runtime/tvm/... ./pkg/processor/trigger/openinference/..
 A processor built without the TVM version and commit refuses every model; the image sets
 them with
 `-ldflags "-X .../runtime/tvm.runtimeTVMVersion=<version> -X .../runtime/tvm.runtimeTVMGitCommit=<commit>"`.
-
-To build the image locally, from `~/tvm/src/tvm-current` by default (`TVM_HOME` to change
-it):
-
-```bash
-./images/tvm/build.sh            # builds tvm-runtime-go:0.26
-./images/tvm/build.sh --load     # ... and loads it into minikube
-REGISTRY=registry.example.com ./images/tvm/build.sh --push
-```
 
 ## Limitations
 
