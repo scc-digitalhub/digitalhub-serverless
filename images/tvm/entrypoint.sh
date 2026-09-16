@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: © 2025 DSLab - Fondazione Bruno Kessler
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # Generate the Nuclio processor config from env, then run the processor.
 set -euo pipefail
 
@@ -38,5 +42,5 @@ spec:
         output_tensors: ${OUT_T}
 EOF
 
-echo "[tvm-go-serve] model=${TVM_MODEL_NAME:-model} dir=${MODEL_DIR} rest=${TVM_SERVE_PORT:-8080} grpc=${TVM_SERVE_GRPC_PORT:-9000} workers=${TVM_SERVE_WORKERS:-1}"
+echo "[tvm-go-serve] model=${TVM_MODEL_NAME:-model} dir=${MODEL_DIR} rest=${TVM_SERVE_PORT:-8080} grpc=${TVM_SERVE_GRPC_PORT:-9000} workers=${TVM_SERVE_WORKERS:-1} tvm_threads=${TVM_NUM_THREADS:-default}"
 exec /opt/nuclio/processor --config "$CFG"

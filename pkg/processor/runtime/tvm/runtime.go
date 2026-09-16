@@ -94,6 +94,10 @@ func NewRuntime(parentLogger logger.Logger,
 			return nil, err
 		}
 	}
+	modelPath := filepath.Join(modelDir, "model.so")
+	if err := validateModelCompatibility(r.metadata, modelPath); err != nil {
+		return nil, errors.Wrap(err, "Incompatible TVM model")
+	}
 
 	// load + run on ONE dedicated OS thread (VM/ffi handles are not thread-safe).
 	ready := make(chan error, 1)
@@ -102,9 +106,12 @@ func NewRuntime(parentLogger logger.Logger,
 		return nil, errors.Wrap(err, "Failed to load TVM model")
 	}
 
+	// TVM_NUM_THREADS sizes the TVM thread pool of this worker; when empty TVM uses every
+	// core. CORE splits the pod CPUs among the workers.
 	parentLogger.InfoWith("TVM runtime ready",
 		"modelDir", modelDir, "entry", r.metadata.Entry,
-		"inputs", len(r.metadata.Inputs), "outputs", len(r.metadata.Outputs))
+		"inputs", len(r.metadata.Inputs), "outputs", len(r.metadata.Outputs),
+		"tvmNumThreads", os.Getenv("TVM_NUM_THREADS"))
 	r.SetStatus(status.Ready)
 	return r, nil
 }

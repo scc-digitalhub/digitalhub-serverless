@@ -18,6 +18,8 @@ worker.
 - One model per processor, served over REST `8080` / gRPC `9000`.
 - Multiple workers per pod (`TVM_SERVE_WORKERS` → nuclio `numWorkers`): each
   worker loads its own copy of the model, for up to N concurrent inferences.
+- Each worker runs its operators on its own TVM thread pool, sized by
+  `TVM_NUM_THREADS` (CORE splits the pod CPUs among the workers).
 - The `model.so` + `metadata.json` are staged into `TVM_MODEL_DIR` by an init
   container (CORE deployment); the runtime just loads and serves them.
 
@@ -186,12 +188,19 @@ references no symbol from it directly (it registers the ffi globals at load).
 ## 5. The serving image (`images/tvm/`)
 
 Builds `tvm-runtime-go`: a Nuclio processor with the `tvm` runtime compiled in,
-linked against TVM (currently **0.25**); `build.sh` tags the image with that TVM
-version (e.g. `tvm-runtime-go:0.25`).
+linked against the TVM runtime. The image is built by GitHub Actions
+(`.github/workflows/tvm-runtime-go-image.yml`) when a `tvm-X.Y.Z` tag is pushed:
+`tvm-0.26.0` publishes `ghcr.io/scc-digitalhub/tvm-runtime-go:0.26.0` on Apache TVM
+`0.26.0`, for `linux/amd64`, `linux/arm64` and `linux/arm/v7`. Never create a GitHub
+Release for these tags: releases publish the other runtimes of this repository.
+
+For each architecture the workflow compiles only the TVM runtime (no LLVM) from that
+Apache TVM release, stages the build context below and builds the image; a last job
+joins the images into one multi-architecture tag.
 
 | File | Purpose |
 |------|---------|
-| `build.sh` | stages the build context: copies tvm-ffi/dlpack headers → `tvm-include/`, `libtvm_ffi.so`+`libtvm_runtime.so` → `tvm-lib/`, rsyncs repo source → `src/`; `docker build`; optional `--load` (minikube) / `--push` |
+| build context | staged by the workflow: tvm-ffi/dlpack headers → `tvm-include/`, `libtvm_ffi.so`+`libtvm_runtime.so` → `tvm-lib/`, repository source → `src/`, plus `provenance.json` |
 | `Dockerfile` | 2-stage: **build** = `golang:1.25` with `CGO_ENABLED=1` + `CGO_CFLAGS/LDFLAGS` pointing at `/opt/tvm`, `go build ./cmd/processor/main.go`; **runtime** = `ubuntu:24.04` + `libstdc++6`, copies the two TVM `.so`s and the processor |
 | `entrypoint.sh` | generates `/tmp/processor.yaml` from env (`spec.runtime: tvm`, `openinference` trigger with REST/gRPC ports and `numWorkers: $TVM_SERVE_WORKERS`, plus the v2 input/output tensor metadata pulled from `metadata.json` via `jq`), then `exec`s the processor with `--config` |
 
@@ -205,6 +214,7 @@ Runtime env baked into the image:
 | `TVM_SERVE_PORT` | `8080` | REST |
 | `TVM_SERVE_GRPC_PORT` | `9000` | gRPC |
 | `TVM_SERVE_WORKERS` | `1` | nuclio `numWorkers`: model copies / max concurrent inferences per pod |
+| `TVM_NUM_THREADS` | every core (TVM default) | threads of each worker's TVM thread pool, read by the TVM runtime; CORE sets it from the pod CPU request divided by the workers |
 
 The `processor.yaml` is written to `/tmp` (world-writable) because the pod runs
 as a non-root UID and `/etc` is not writable.
@@ -227,6 +237,7 @@ tvm+serve run
       │        into  <homeDir>/model   (via ContextRef inputContextRef → "model/")
       │
       ├─ env:  TVM_MODEL_DIR=<homeDir>/model,  TVM_MODEL_NAME=<servedName>,  TVM_TASK_KIND
+      │        TVM_SERVE_WORKERS=<workers>,  TVM_NUM_THREADS=<cpu request / workers>
       │
       ├─ image: task.image  ||  properties.getServe()   ← runtime.tvm.serve / RUNTIME_TVM_SERVE
       │        (no command/args: base image ENTRYPOINT launches the server)
@@ -237,9 +248,8 @@ tvm+serve run
 
 The base serve image is **swappable** via `runtime.tvm.serve`
 (`RUNTIME_TVM_SERVE`) or a per-task `task.image` override. This native Go image
-(`tvm-runtime-go`) is a drop-in alternative — same `TVM_MODEL_DIR` contract,
-same REST/gRPC ports, same OpenInference v2 — to whatever base image is
-configured.
+(`tvm-runtime-go`) is the default; the Rust image is a drop-in alternative with the
+same `TVM_MODEL_DIR` contract, REST/gRPC ports and OpenInference v2 surface.
 
 ---
 
@@ -257,13 +267,13 @@ host language of the in-process TVM driver:
 | FFI | Rust → tvm-ffi | Go cgo → tvm-ffi (same 5-call dance) |
 | Wire | OpenInference v2 REST/gRPC | OpenInference v2 REST/gRPC |
 | Model contract | `TVM_MODEL_DIR` / `model.so` + `metadata.json` | identical |
-| CORE default | **yes** (`runtime.tvm.serve` default) | selectable alternative |
+| CORE default | selectable alternative | **yes** (`runtime.tvm.serve` default) |
 | Precision | CPU, native dtypes (FP16 deferred) | CPU, native dtypes (FP16 deferred) |
 | Concurrency | pool of N OS threads, N model copies | N nuclio workers, N model copies |
 
 Both scale to N concurrent inferences per pod via `TVM_SERVE_WORKERS`, each at
 the cost of N in-memory model copies.
 
-CORE currently defaults `runtime.tvm.serve` to
-`ghcr.io/scc-digitalhub/tvm-runtime-rust:0.25`; point it (or `task.image`) at the
-Go image to switch, with no other change to the compile/serve flow.
+CORE defaults `runtime.tvm.serve` to `ghcr.io/scc-digitalhub/tvm-runtime-go:<version>`;
+point it (or `task.image`) at the Rust image to switch, with no other change to the
+compile/serve flow.

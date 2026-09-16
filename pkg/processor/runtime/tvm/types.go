@@ -20,7 +20,10 @@ type tensorSpec struct {
 }
 
 type modelMetadata struct {
-	Entry   string       `json:"entry"`
-	Inputs  []tensorSpec `json:"inputs"`
-	Outputs []tensorSpec `json:"outputs"`
+	Entry        string       `json:"entry"`
+	Inputs       []tensorSpec `json:"inputs"`
+	Outputs      []tensorSpec `json:"outputs"`
+	Target       string       `json:"target"`
+	TVMVersion   string       `json:"tvm_version"`
+	TVMGitCommit string       `json:"tvm_git_commit"`
 }
