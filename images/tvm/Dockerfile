@@ -44,9 +44,13 @@ COPY provenance.json /opt/tvm/provenance.json
 COPY --from=build /out/processor /opt/nuclio/processor
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
-RUN ldd /opt/nuclio/processor | grep -F '/opt/tvm/lib/libtvm_ffi.so' \
-    && ldd /opt/nuclio/processor | grep -F '/opt/tvm/lib/libtvm_runtime.so' \
-    && ! ldd /opt/nuclio/processor | grep -F 'not found'
+# Lists the libraries the processor loads, like ldd. ldd itself crashes under the QEMU
+# emulation used to build the arm/v7 image, while the loader's trace mode works there too.
+RUN LD_TRACE_LOADED_OBJECTS=1 /opt/nuclio/processor > /tmp/libraries \
+    && grep -F '/opt/tvm/lib/libtvm_ffi.so' /tmp/libraries \
+    && grep -F '/opt/tvm/lib/libtvm_runtime.so' /tmp/libraries \
+    && ! grep -F 'not found' /tmp/libraries \
+    && rm /tmp/libraries
 # LD_LIBRARY_PATH beats the binary's rpath (host build path, absent here).
 ENV LD_LIBRARY_PATH=/opt/tvm/lib \
     TVM_VERSION=${TVM_VERSION} \
