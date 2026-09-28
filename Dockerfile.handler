@@ -54,7 +54,7 @@ RUN python -m pip install wheel && python -m pip wheel -w /whl --requirement /re
 FROM ghcr.io/astral-sh/uv:${UV_IMAGE_TAG} AS uv
 
 # PYTHON-HANDLER (final image)
-FROM python:${PYTHON_VERSION}-slim 
+FROM python:${PYTHON_VERSION}-slim
 ARG PYTHON_VERSION
 ARG DH_SDK_VERSION
 ARG DH_PYTHON_VERSION
@@ -78,7 +78,7 @@ RUN python /opt/nuclio/whl/$(basename /opt/nuclio/whl/pip-*.whl)/pip install pip
 RUN cat /opt/nuclio/requirements/common.txt
 # RUN python -m pip install --no-index \
 #   --cache-dir /opt/nuclio/whl --find-links /opt/nuclio/whl -r /opt/nuclio/requirements/common.txt
-RUN /opt/nuclio/uv/uv  pip install --system --no-index \ 
+RUN /opt/nuclio/uv/uv  pip install --system --no-index \
   --cache-dir /opt/nuclio/whl --find-links /opt/nuclio/whl -r /opt/nuclio/requirements/common.txt
 # cleanup to shave off couple hundreds MBs
 RUN apt-get clean && rm -rf /opt/nuclio/whl
