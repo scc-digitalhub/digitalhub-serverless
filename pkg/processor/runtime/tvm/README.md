@@ -96,10 +96,8 @@ runs on a Raspberry Pi.
 
 ## Use from DigitalHub CORE
 
-It is the default serve runtime: a `tvm+serve` run uses it unless it sets
-`serve_runtime: rust` or its own `image`. CORE takes the image from `RUNTIME_TVM_SERVE_GO`
-(default `ghcr.io/scc-digitalhub/tvm-runtime-go:0.26.0`). The tag is multi-arch, so the same
-image serves the amd64, arm64 and arm/v7 nodes. CORE:
+It is the default serve image (`RUNTIME_TVM_SERVE`); a single `tvm+serve` run can choose
+another one with `image`. CORE:
 
 - downloads the `tvm-so` Model into `TVM_MODEL_DIR` with an init container;
 - sets `TVM_MODEL_NAME`, `TVM_SERVE_WORKERS` and `TVM_NUM_THREADS` (the run CPUs divided by
