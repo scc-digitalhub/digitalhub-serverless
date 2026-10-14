@@ -12,8 +12,10 @@ package openinference
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -283,9 +285,9 @@ func (s *grpcInferenceServer) convertRESTToGRPCResponse(resp *RESTInferenceRespo
 			grpcResp.Parameters[key] = &pb.InferParameter{
 				ParameterChoice: &pb.InferParameter_Int64Param{Int64Param: v},
 			}
-		case float64:
+		case float64, json.Number:
 			grpcResp.Parameters[key] = &pb.InferParameter{
-				ParameterChoice: &pb.InferParameter_Int64Param{Int64Param: int64(v)},
+				ParameterChoice: &pb.InferParameter_Int64Param{Int64Param: numberInt64(v)},
 			}
 		case string:
 			grpcResp.Parameters[key] = &pb.InferParameter{
@@ -314,9 +316,9 @@ func (s *grpcInferenceServer) convertRESTToGRPCResponse(resp *RESTInferenceRespo
 				tensor.Parameters[key] = &pb.InferParameter{
 					ParameterChoice: &pb.InferParameter_Int64Param{Int64Param: v},
 				}
-			case float64:
+			case float64, json.Number:
 				tensor.Parameters[key] = &pb.InferParameter{
-					ParameterChoice: &pb.InferParameter_Int64Param{Int64Param: int64(v)},
+					ParameterChoice: &pb.InferParameter_Int64Param{Int64Param: numberInt64(v)},
 				}
 			case string:
 				tensor.Parameters[key] = &pb.InferParameter{
@@ -390,9 +392,7 @@ func (s *grpcInferenceServer) convertDataToTensorContents(data any, datatype str
 			// Handle JSON array
 			ints := make([]int32, len(arr))
 			for i, v := range arr {
-				if f, ok := v.(float64); ok {
-					ints[i] = int32(f)
-				}
+				ints[i] = int32(numberInt64(v))
 			}
 			contents.IntContents = ints
 		}
@@ -410,9 +410,7 @@ func (s *grpcInferenceServer) convertDataToTensorContents(data any, datatype str
 			// Handle JSON array
 			ints := make([]int64, len(arr))
 			for i, v := range arr {
-				if f, ok := v.(float64); ok {
-					ints[i] = int64(f)
-				}
+				ints[i] = numberInt64(v)
 			}
 			contents.Int64Contents = ints
 		}
@@ -423,9 +421,7 @@ func (s *grpcInferenceServer) convertDataToTensorContents(data any, datatype str
 			// Handle JSON array
 			uints := make([]uint32, len(arr))
 			for i, v := range arr {
-				if f, ok := v.(float64); ok {
-					uints[i] = uint32(f)
-				}
+				uints[i] = uint32(numberUint64(v))
 			}
 			contents.UintContents = uints
 		}
@@ -436,9 +432,7 @@ func (s *grpcInferenceServer) convertDataToTensorContents(data any, datatype str
 			// Handle JSON array
 			uints := make([]uint64, len(arr))
 			for i, v := range arr {
-				if f, ok := v.(float64); ok {
-					uints[i] = uint64(f)
-				}
+				uints[i] = numberUint64(v)
 			}
 			contents.Uint64Contents = uints
 		}
@@ -456,9 +450,7 @@ func (s *grpcInferenceServer) convertDataToTensorContents(data any, datatype str
 			// Handle JSON array
 			floats := make([]float32, len(arr))
 			for i, v := range arr {
-				if f, ok := v.(float64); ok {
-					floats[i] = float32(f)
-				}
+				floats[i] = float32(numberFloat64(v))
 			}
 			contents.Fp32Contents = floats
 		}
@@ -469,9 +461,7 @@ func (s *grpcInferenceServer) convertDataToTensorContents(data any, datatype str
 			// Handle JSON array
 			floats := make([]float64, len(arr))
 			for i, v := range arr {
-				if f, ok := v.(float64); ok {
-					floats[i] = f
-				}
+				floats[i] = numberFloat64(v)
 			}
 			contents.Fp64Contents = floats
 		}
@@ -497,6 +487,36 @@ func (s *grpcInferenceServer) convertDataToTensorContents(data any, datatype str
 	}
 
 	return contents
+}
+
+func numberInt64(value any) int64 {
+	if n, ok := value.(json.Number); ok {
+		if integer, err := n.Int64(); err == nil {
+			return integer
+		}
+	}
+	return int64(numberFloat64(value))
+}
+
+func numberUint64(value any) uint64 {
+	if n, ok := value.(json.Number); ok {
+		if integer, err := strconv.ParseUint(string(n), 10, 64); err == nil {
+			return integer
+		}
+	}
+	return uint64(numberFloat64(value))
+}
+
+func numberFloat64(value any) float64 {
+	switch n := value.(type) {
+	case json.Number:
+		f, _ := n.Float64()
+		return f
+	case float64:
+		return n
+	default:
+		return 0
+	}
 }
 
 func BytesToTensor(dataType string, data []byte, shape []int64) (any, error) {

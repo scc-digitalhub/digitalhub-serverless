@@ -44,7 +44,6 @@ type inferResult struct {
 
 type tvmRuntime struct {
 	*runtime.AbstractRuntime // supplies every Runtime method except ProcessEvent/ProcessBatch
-	configuration            *runtime.Configuration
 	metadata                 modelMetadata
 	jobCh                    chan inferJob // ProcessEvent -> modelLoop
 }
@@ -58,7 +57,6 @@ func NewRuntime(parentLogger logger.Logger,
 	}
 	r := &tvmRuntime{
 		AbstractRuntime: abstract,
-		configuration:   configuration,
 		jobCh:           make(chan inferJob),
 	}
 
@@ -173,6 +171,7 @@ func (r *tvmRuntime) ProcessEvent(event nuclio.Event,
 	if err != nil {
 		return nil, err
 	}
+	req.Inputs = nil
 
 	job := inferJob{inputs: inputs, respCh: make(chan inferResult, 1)}
 	r.jobCh <- job
@@ -201,34 +200,7 @@ func (r *tvmRuntime) buildInputs(in []openinference.RESTInferInputTensor) ([]tvm
 	if len(r.metadata.Inputs) > 0 && len(in) != len(r.metadata.Inputs) {
 		return nil, errors.Errorf("expected %d input tensor(s), got %d", len(r.metadata.Inputs), len(in))
 	}
-	// if every request input is named and the names match the model's, reorder to
-	// metadata order; otherwise match positionally.
-	if len(r.metadata.Inputs) > 0 {
-		byName := make(map[string]int, len(in))
-		named := true
-		for i := range in {
-			if in[i].Name == "" {
-				named = false
-				break
-			}
-			byName[in[i].Name] = i
-		}
-		if named && len(byName) == len(r.metadata.Inputs) {
-			reordered := make([]openinference.RESTInferInputTensor, 0, len(in))
-			ok := true
-			for _, spec := range r.metadata.Inputs {
-				idx, found := byName[spec.Name]
-				if !found {
-					ok = false
-					break
-				}
-				reordered = append(reordered, in[idx])
-			}
-			if ok {
-				in = reordered
-			}
-		}
-	}
+	in = orderInputs(in, r.metadata.Inputs)
 	out := make([]tvmrelax.Tensor, 0, len(in))
 	for i := range in {
 		t := &in[i]
@@ -267,6 +239,32 @@ func (r *tvmRuntime) buildInputs(in []openinference.RESTInferInputTensor) ([]tvm
 		out = append(out, tvmrelax.Tensor{Shape: t.Shape, Code: code, Bits: bits, Data: raw})
 	}
 	return out, nil
+}
+
+// Match complete names to metadata; otherwise keep positional order.
+func orderInputs(inputs []openinference.RESTInferInputTensor, specs []tensorSpec) []openinference.RESTInferInputTensor {
+	if len(specs) == 0 {
+		return inputs
+	}
+	byName := make(map[string]int, len(inputs))
+	for i, input := range inputs {
+		if input.Name == "" {
+			return inputs
+		}
+		byName[input.Name] = i
+	}
+	if len(byName) != len(specs) {
+		return inputs
+	}
+	ordered := make([]openinference.RESTInferInputTensor, len(specs))
+	for i, spec := range specs {
+		index, found := byName[spec.Name]
+		if !found {
+			return inputs
+		}
+		ordered[i] = inputs[index]
+	}
+	return ordered
 }
 
 // buildResponse decodes each output using its actual dtype (from the tensor, not

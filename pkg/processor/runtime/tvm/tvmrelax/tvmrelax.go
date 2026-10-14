@@ -158,11 +158,23 @@ static int tvm_input_add(tvm_inputs_t* in, const void* data, long long nbytes,
                          const long long* shape, char* err, int cap) {
   if (in->n >= TVM_MAX_OUT) { snprintf(err, cap, "too many inputs"); return -1; }
   int64_t* shp = (int64_t*)malloc(sizeof(int64_t) * (ndim > 0 ? ndim : 1));
+  void* buf = NULL;
+  // Match TVM's default tensor alignment, including ARM NEON loads.
+  if (!shp || posix_memalign(&buf, 64, nbytes > 0 ? (size_t)nbytes : 1) != 0) {
+    free(shp);
+    snprintf(err, cap, "failed to allocate input tensor");
+    return -1;
+  }
   for (int k = 0; k < ndim; k++) shp[k] = (int64_t)shape[k];
-  void* buf = malloc(nbytes > 0 ? (size_t)nbytes : 1);
   if (nbytes > 0) memcpy(buf, data, (size_t)nbytes);
 
   DLManagedTensor* mt = (DLManagedTensor*)malloc(sizeof(DLManagedTensor));
+  if (!mt) {
+    free(shp);
+    free(buf);
+    snprintf(err, cap, "failed to allocate input tensor metadata");
+    return -1;
+  }
   memset(mt, 0, sizeof(*mt));
   mt->dl_tensor.data = buf;
   mt->dl_tensor.device.device_type = kDLCPU;
@@ -178,7 +190,7 @@ static int tvm_input_add(tvm_inputs_t* in, const void* data, long long nbytes,
   mt->deleter = tvm_dl_free;
 
   TVMFFIObjectHandle h;
-  if (TVMFFITensorFromDLPack(mt, 0, 0, &h) != 0) { tvm_take_error("TensorFromDLPack", err, cap); tvm_dl_free(mt); return -1; }
+  if (TVMFFITensorFromDLPack(mt, 64, 0, &h) != 0) { tvm_take_error("TensorFromDLPack", err, cap); tvm_dl_free(mt); return -1; }
   in->h[in->n++] = h;
   return 0;
 }
@@ -216,8 +228,12 @@ static int tvm_model_run(tvm_model_t* m, tvm_inputs_t* in, tvm_result_t* out,
     TVMFFIAny aa, ra; memset(&aa, 0, sizeof(aa));
     aa.type_index = kTVMFFIArray; aa.v_obj = (TVMFFIObject*)arr; ra.type_index = kTVMFFINone;
     if (TVMFFIFunctionCall(m->fArrSize, &aa, 1, &ra) != 0) { tvm_take_error("ArraySize", err, cap); TVMFFIObjectDecRef(arr); return -1; }
+    if (ra.v_int64 < 0 || ra.v_int64 > TVM_MAX_OUT) {
+      snprintf(err, cap, "unsupported output count %lld (maximum %d)", (long long)ra.v_int64, TVM_MAX_OUT);
+      TVMFFIObjectDecRef(arr);
+      return -1;
+    }
     int n = (int)ra.v_int64;
-    if (n > TVM_MAX_OUT) n = TVM_MAX_OUT;
     for (int i = 0; i < n; i++) {
       TVMFFIAny ga[2], gr; memset(ga, 0, sizeof(ga));
       ga[0].type_index = kTVMFFIArray; ga[0].v_obj = (TVMFFIObject*)arr;

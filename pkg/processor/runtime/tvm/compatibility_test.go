@@ -34,7 +34,11 @@ func TestValidateELFArchitecture(t *testing.T) {
 	executable, err := os.Executable()
 	require.NoError(t, err)
 	assert.NoError(t, validateELFArchitecture(executable, runtime.GOARCH))
-	assert.Error(t, validateELFArchitecture(executable, "arm64"))
+	for _, arch := range []string{"amd64", "arm64", "arm"} {
+		if arch != runtime.GOARCH {
+			assert.Error(t, validateELFArchitecture(executable, arch))
+		}
+	}
 	assert.Error(t, validateELFArchitecture(t.TempDir()+"/missing.so", runtime.GOARCH))
 }
 

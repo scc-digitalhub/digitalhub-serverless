@@ -43,13 +43,6 @@ var dtypeTable = map[string]dtypeInfo{
 
 // derived from dtypeTable: TVM dtype names, and the reverse (code, bits) -> v2 map.
 var (
-	tvmDtypeNames = func() map[string]bool {
-		m := make(map[string]bool, len(dtypeTable))
-		for _, info := range dtypeTable {
-			m[info.tvmName] = true
-		}
-		return m
-	}()
 	dlpackToV2Name = func() map[[2]int]string {
 		m := make(map[[2]int]string, len(dtypeTable))
 		for name, info := range dtypeTable {
@@ -81,7 +74,8 @@ func v2ToDLPack(datatype string) (code, bits uint8, err error) {
 
 // supportedTvmDtype reports whether a metadata.json TVM dtype name is serveable.
 func supportedTvmDtype(dt string) bool {
-	return tvmDtypeNames[dt]
+	_, ok := tvmToV2Name[dt]
+	return ok
 }
 
 // dlpackToV2 maps a DLPack (code, bits) pair back to a v2 datatype string.

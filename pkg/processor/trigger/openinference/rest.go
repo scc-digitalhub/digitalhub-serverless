@@ -10,6 +10,7 @@ https://github.com/kserve/open-inference-protocol/blob/main/specification/protoc
 package openinference
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -57,10 +58,26 @@ type RESTInferenceResponse struct {
 	Outputs      []RESTInferOutputTensor `json:"outputs"`
 }
 
+func decodeJSON(data []byte, value any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+	var extra json.RawMessage
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("expected a single JSON value")
+	}
+	return nil
+}
+
 func Deserialize(data []byte) (*RESTInferenceResponse, error) {
 	// expect data to be JSON with base64-encoded strings for BYTES datatype, need to decode them back to []byte
 	var temp RESTInferenceResponse
-	if err := json.Unmarshal(data, &temp); err != nil {
+	if err := decodeJSON(data, &temp); err != nil {
 		return nil, err
 	}
 
@@ -304,7 +321,7 @@ func (oi *openInference) handleModelInfer(w http.ResponseWriter, r *http.Request
 
 	// Parse inference request
 	var inferRequest RESTInferenceRequest
-	if err := json.Unmarshal(body, &inferRequest); err != nil {
+	if err := decodeJSON(body, &inferRequest); err != nil {
 		oi.Logger.WarnWith("Failed to parse inference request", "error", err)
 		http.Error(w, "Invalid request format", http.StatusBadRequest)
 		return
@@ -319,6 +336,7 @@ func (oi *openInference) handleModelInfer(w http.ResponseWriter, r *http.Request
 	}
 
 	// Create nuclio event with the REST inference request as body
+	inferRequest.Inputs = nil
 	event := &Event{
 		body: body,
 		headers: map[string]any{

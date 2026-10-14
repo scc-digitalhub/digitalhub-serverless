@@ -69,21 +69,18 @@ jobs:
           - arch: amd64
             runner: ubuntu-24.04
             platform: linux/amd64
-            rust_target: x86_64-unknown-linux-gnu
             elf_machine: Advanced Micro Devices X86-64
             cross: ""
           - arch: arm64
             runner: ubuntu-24.04-arm
             platform: linux/arm64
-            rust_target: aarch64-unknown-linux-gnu
             elf_machine: AArch64
             cross: ""
-          # the armv7l target of runtime-tvm: GitHub has no armv7 runners, so it is cross-compiled
+          # the arm32 target of runtime-tvm: GitHub has no armv7 runners, so it is cross-compiled
           # on amd64 and QEMU only runs the arm/v7 image steps
           - arch: armv7
             runner: ubuntu-24.04
             platform: linux/arm/v7
-            rust_target: armv7-unknown-linux-gnueabihf
             elf_machine: ARM
             cross: arm-linux-gnueabihf
     runs-on: ${{ matrix.runner }}

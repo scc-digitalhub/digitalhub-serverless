@@ -75,6 +75,7 @@ curl -X POST http://localhost:8080/v2/models/my-model/infer \
   otherwise by position. A missing `datatype` means `FP32`.
 - **Data types**: `FP32`, `FP64`, `INT8`, `INT16`, `INT32`, `INT64`, `UINT8`, `UINT16`,
   `UINT32`, `UINT64`.
+  Integer JSON values retain full `INT64`/`UINT64` precision through REST and gRPC.
 - **Size limits**: 512 MB for a REST request and for a gRPC message.
 - **Quantized models** (`int8` / `uint8` tensors): the REST model metadata adds `scale`,
   `zero_point` and `quantized_dimension` under `parameters`, so the client can convert the
@@ -91,8 +92,10 @@ At startup the runtime refuses the model, with a clear error, unless:
   is a library for that architecture;
 - every input and output uses a supported data type.
 
-The image exists for `linux/amd64`, `linux/arm64` and `linux/arm/v7`, so the same command
-runs on a Raspberry Pi.
+Runtime image builds cover `linux/amd64` (Intel/AMD 64-bit), `linux/arm64`
+(ARM 64-bit/AArch64) and `linux/arm/v7` (ARM 32-bit). CORE's `arm32` profile produces
+an ARMv7 hard-float model requiring NEON, for the `linux/arm/v7` runtime.
+All three platforms remain supported; the target rename removes none of them.
 
 ## Use from DigitalHub CORE
 
@@ -104,6 +107,10 @@ another one with `image`. CORE:
   the workers);
 - starts the pod on a node with the architecture of the model, where Kubernetes pulls the
   matching variant of the image.
+
+CORE's default init image covers only AMD64 and ARM64. Serving on an ARM32 cluster node
+also requires an ARMv7-compatible init image to download the model. Standalone serving
+with the model mounted into the runtime container does not use this init image.
 
 ## How it works
 
@@ -160,6 +167,7 @@ them with
 
 - CPU only, no GPU.
 - One model per processor; no batching.
+- At most 64 output tensors per inference; larger results are rejected, never truncated.
 - `FP16` tensors are not supported yet.
 
 ## Security Policy
