@@ -10,6 +10,15 @@ ARG NUCLIO_DOCKER_REPO=quay.io/nuclio
 ARG UV_IMAGE_TAG=latest
 ARG DH_SDK_VERSION=0.16.0b13
 ARG DH_PYTHON_VERSION=0.16.0b10
+ARG DH_CONTAINER_VERSION=0.16.0b4
+ARG DH_MODELSERVE_VERSION=0.16.0b4
+ARG DH_DBT_VERSION=0.16.0b5
+ARG DH_HERA_VERSION=0.16.0b5
+ARG DH_FLOWER_VERSION=0.16.0b4
+ARG DH_SERVICEGRAPH_VERSION=0.16.0b3
+ARG DH_TVM_VERSION=0.16.0b2
+ARG DH_HYDRA_VERSION=0.16.0b3
+ARG DH_RAY_VERSION=0.16.0b9
 
 # --- Build processor binary ---
 FROM  golang:1.25 AS go-builder
@@ -39,19 +48,38 @@ FROM ghcr.io/astral-sh/uv:${UV_IMAGE_TAG} AS uv
 FROM python:${PYTHON_VERSION}-slim AS python-wheels
 ARG DH_SDK_VERSION
 ARG DH_PYTHON_VERSION
+ARG DH_CONTAINER_VERSION
+ARG DH_MODELSERVE_VERSION
+ARG DH_DBT_VERSION
+ARG DH_HERA_VERSION
+ARG DH_FLOWER_VERSION
+ARG DH_SERVICEGRAPH_VERSION
+ARG DH_TVM_VERSION
+ARG DH_HYDRA_VERSION
+ARG DH_RAY_VERSION
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
 COPY --from=onbuild /home/nuclio/bin/py/requirements/common.txt /requirements/nuclio.txt
 # cleanup nuclio dependencies to avoid conflicts, these will be added when needed at install time
 RUN sed -i -e '/^mock==/d' -e '/^pip==/d' -e '/^setuptools==/d' -e '/^wheel==/d' /requirements/nuclio.txt
 RUN pip download --dest /whl --exists-action i --only-binary=:all: --requirement /requirements/nuclio.txt
 COPY pkg/processor/runtime/python/py/requirements/common.txt /requirements/common.txt
-RUN printf '%b\n' "digitalhub[full]==${DH_SDK_VERSION}\ndigitalhub-runtime-python==${DH_PYTHON_VERSION}" >> /requirements/common.txt
+RUN printf '%s\n' \
+  "digitalhub[full]==${DH_SDK_VERSION}" \
+  "digitalhub-runtime-python==${DH_PYTHON_VERSION}" \
+  "digitalhub-runtime-container==${DH_CONTAINER_VERSION}" \
+  "digitalhub-runtime-modelserve==${DH_MODELSERVE_VERSION}" \
+  "digitalhub-runtime-dbt==${DH_DBT_VERSION}" \
+  "digitalhub-runtime-hera==${DH_HERA_VERSION}" \
+  "digitalhub-runtime-flower==${DH_FLOWER_VERSION}" \
+  "digitalhub-runtime-servicegraph==${DH_SERVICEGRAPH_VERSION}" \
+  "digitalhub-runtime-tvm==${DH_TVM_VERSION}" \
+  "digitalhub-runtime-hydra==${DH_HYDRA_VERSION}" \
+  "digitalhub-runtime-ray==${DH_RAY_VERSION}" \
+  >> /requirements/common.txt
 RUN python -m pip install wheel && python -m pip wheel -w /whl --requirement /requirements/common.txt
 
 # --- final aggregated layer image ---
 FROM scratch
-ARG DH_SDK_VERSION
-ARG DH_PYTHON_VERSION
 LABEL org.opencontainers.image.source=https://github.com/scc-digitalhub/digitalhub-serverless
 COPY --from=onbuild /home/nuclio/bin/py /opt/nuclio/
 COPY --from=go-builder /out/processor /opt/nuclio/processor
