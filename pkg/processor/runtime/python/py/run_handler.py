@@ -153,7 +153,7 @@ def handler_job(context: Context, event: Event) -> Response:
             **context.run.status.to_dict(),
         }
         context.run.set_status(new_status)
-        context.run.save(update=True)
+        context.run.update()
 
     except Exception as e:
         raise e
