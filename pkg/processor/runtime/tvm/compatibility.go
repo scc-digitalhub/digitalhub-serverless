@@ -54,10 +54,10 @@ func validateModelCompatibility(metadata modelMetadata, modelPath string) error 
 	if err := validateLLVMTarget(metadata.Target, runtime.GOARCH); err != nil {
 		return err
 	}
-	if err := validateELFArchitecture(modelPath, runtime.GOARCH); err != nil {
+	if err := validateTargetTriple(metadata.TargetTriple, runtime.GOARCH); err != nil {
 		return err
 	}
-	return nil
+	return validateELFArchitecture(modelPath, runtime.GOARCH)
 }
 
 func validateLLVMTarget(targetText, runtimeArch string) error {
@@ -82,19 +82,33 @@ func validateLLVMTarget(targetText, runtimeArch string) error {
 	if target.Kind != "llvm" {
 		return fmt.Errorf("serve image supports LLVM CPU models, got target kind %q", target.Kind)
 	}
-	if target.MTriple == "" {
+	return validateTargetTriple(target.MTriple, runtimeArch)
+}
+
+func validateTargetTriple(triple, runtimeArch string) error {
+	if triple == "" {
 		return nil
 	}
-	targetArch := architectureFromTriple(target.MTriple)
+	_, abi, linux := strings.Cut(triple, "-linux-")
+	if !linux {
+		return fmt.Errorf("serve image requires a Linux target, got %q", triple)
+	}
+	if !strings.HasPrefix(abi, "gnu") {
+		return fmt.Errorf("serve image requires the GNU/glibc ABI, got %q", triple)
+	}
+	targetArch := architectureFromTriple(triple)
 	if targetArch == "" {
-		return fmt.Errorf("unsupported LLVM target triple %q", target.MTriple)
+		return fmt.Errorf("unsupported LLVM target triple %q", triple)
 	}
 	if targetArch != runtimeArch {
 		return fmt.Errorf(
 			"model target triple %q is incompatible with runtime architecture %q",
-			target.MTriple,
+			triple,
 			runtimeArch,
 		)
+	}
+	if targetArch == "arm" && abi != "gnueabihf" {
+		return fmt.Errorf("ARM32 serve image requires the hard-float ABI, got %q", triple)
 	}
 	return nil
 }
@@ -106,7 +120,7 @@ func architectureFromTriple(triple string) string {
 		return "amd64"
 	case arch == "aarch64" || arch == "arm64":
 		return "arm64"
-	case strings.HasPrefix(arch, "arm"):
+	case arch == "arm" || strings.HasPrefix(arch, "armv") || strings.HasPrefix(arch, "thumb"):
 		return "arm"
 	case arch == "riscv64":
 		return "riscv64"
@@ -142,6 +156,16 @@ func validateELFArchitecture(path, runtimeArch string) error {
 			file.Machine,
 			runtimeArch,
 		)
+	}
+	class, order := elf.ELFCLASS64, elf.ELFDATA2LSB
+	if runtimeArch == "arm" {
+		class = elf.ELFCLASS32
+	}
+	if runtimeArch == "s390x" {
+		order = elf.ELFDATA2MSB
+	}
+	if file.Class != class || file.Data != order {
+		return fmt.Errorf("model ELF class/byte order is incompatible with runtime architecture %q", runtimeArch)
 	}
 	return nil
 }

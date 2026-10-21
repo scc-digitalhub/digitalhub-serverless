@@ -88,14 +88,25 @@ At startup the runtime refuses the model, with a clear error, unless:
 
 - `metadata.json` has the same `tvm_version` and `tvm_git_commit` as the TVM built into the
   image: **compile with the DigitalHub TVM Toolkit of the same release**;
-- the model was compiled for a CPU (LLVM target) of the image architecture, and `model.so`
-  is a library for that architecture;
+- the model was compiled for a Linux GNU/glibc CPU (LLVM target) of the image architecture;
+- `target_triple`, when present, agrees with the runtime, and the actual ELF library
+  has the matching machine, 32/64-bit class and byte order;
 - every input and output uses a supported data type.
 
 Runtime image builds cover `linux/amd64` (Intel/AMD 64-bit), `linux/arm64`
 (ARM 64-bit/AArch64) and `linux/arm/v7` (ARM 32-bit). CORE's `arm32` profile produces
 an ARMv7 hard-float model requiring NEON, for the `linux/arm/v7` runtime.
 All three platforms remain supported; the target rename removes none of them.
+
+Compile profiles live in CORE's `runtime-tvm.yaml`, not in this runtime. Go reads
+the effective target from the model, so adding a profile for an already compatible
+CPU does not require a server change. Older metadata can omit `target_triple`;
+the existing `target`, TVM version and revision checks still apply. ARM32 requires
+the hard-float ABI.
+
+Architecture checks do not verify every instruction selected by `mcpu`/`mattr`;
+choose a compatible CPU. Adding a compile profile does not create a runtime image
+for another platform or enable CUDA/GPU inference.
 
 ## Use from DigitalHub CORE
 

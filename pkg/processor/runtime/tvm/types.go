@@ -24,6 +24,7 @@ type modelMetadata struct {
 	Inputs       []tensorSpec `json:"inputs"`
 	Outputs      []tensorSpec `json:"outputs"`
 	Target       string       `json:"target"`
+	TargetTriple string       `json:"target_triple"`
 	TVMVersion   string       `json:"tvm_version"`
 	TVMGitCommit string       `json:"tvm_git_commit"`
 }

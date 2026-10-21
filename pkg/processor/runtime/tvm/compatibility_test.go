@@ -28,6 +28,12 @@ func TestValidateLLVMTarget(t *testing.T) {
 		"amd64",
 	), "incompatible")
 	assert.ErrorContains(t, validateLLVMTarget("{", "amd64"), "invalid TVM target")
+	for _, triple := range []string{"x86_64-apple-darwin", "x86_64-linux-musl", "aarch64-linux-gnu"} {
+		assert.Error(t, validateTargetTriple(triple, "amd64"), triple)
+	}
+	assert.Error(t, validateTargetTriple("armv7l-unknown-linux-gnueabi", "arm"))
+	assert.NoError(t, validateTargetTriple("armv7l-unknown-linux-gnueabihf", "arm"))
+	assert.Empty(t, architectureFromTriple("arm64_be-linux-gnu"))
 }
 
 func TestValidateELFArchitecture(t *testing.T) {
@@ -60,6 +66,12 @@ func TestValidateModelCompatibilityIdentity(t *testing.T) {
 		Target:       "llvm",
 	}
 	assert.NoError(t, validateModelCompatibility(metadata, executable))
+	metadata.TargetTriple = "aarch64-linux-gnu"
+	if runtime.GOARCH == "arm64" {
+		metadata.TargetTriple = "x86_64-linux-gnu"
+	}
+	assert.ErrorContains(t, validateModelCompatibility(metadata, executable), "incompatible")
+	metadata.TargetTriple = ""
 
 	metadata.TVMVersion = "0.25.0"
 	assert.ErrorContains(t, validateModelCompatibility(metadata, executable), "version")
