@@ -52,6 +52,9 @@ import (
 	_ "github.com/nuclio/nuclio/pkg/processor/runtime/ruby"
 	_ "github.com/nuclio/nuclio/pkg/processor/runtime/shell"
 
+	// native TVM runtime (cgo -> libtvm_ffi/libtvm_runtime; requires CGO_ENABLED=1)
+	_ "github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/runtime/tvm"
+
 	// load all triggers
 	_ "github.com/nuclio/nuclio/pkg/processor/trigger/cron"
 	_ "github.com/nuclio/nuclio/pkg/processor/trigger/kafka"

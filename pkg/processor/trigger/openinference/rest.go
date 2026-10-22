@@ -10,8 +10,10 @@ https://github.com/kserve/open-inference-protocol/blob/main/specification/protoc
 package openinference
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -56,10 +58,26 @@ type RESTInferenceResponse struct {
 	Outputs      []RESTInferOutputTensor `json:"outputs"`
 }
 
+func decodeJSON(data []byte, value any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+	var extra json.RawMessage
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("expected a single JSON value")
+	}
+	return nil
+}
+
 func Deserialize(data []byte) (*RESTInferenceResponse, error) {
 	// expect data to be JSON with base64-encoded strings for BYTES datatype, need to decode them back to []byte
 	var temp RESTInferenceResponse
-	if err := json.Unmarshal(data, &temp); err != nil {
+	if err := decodeJSON(data, &temp); err != nil {
 		return nil, err
 	}
 
@@ -73,9 +91,15 @@ func Deserialize(data []byte) (*RESTInferenceResponse, error) {
 					return nil, err
 				}
 				temp.Outputs[i].Data = decodedData
-			} else if dataStrArray, ok := output.Data.([]string); ok {
-				byteArray := make([][]byte, len(dataStrArray))
-				for j, s := range dataStrArray {
+			} else if dataAnyArray, ok := output.Data.([]any); ok {
+				// JSON decoding always yields []any (never []string): decode each
+				// base64 element so gRPC clients get real bytes, not base64 text.
+				byteArray := make([][]byte, len(dataAnyArray))
+				for j, e := range dataAnyArray {
+					s, isStr := e.(string)
+					if !isStr {
+						return nil, fmt.Errorf("BYTES output %q element %d is not a string", output.Name, j)
+					}
 					decodedData, err := base64.StdEncoding.DecodeString(s)
 					if err != nil {
 						return nil, err
@@ -123,6 +147,9 @@ type RESTTensorMetadata struct {
 	Name     string  `json:"name"`
 	Datatype string  `json:"datatype"`
 	Shape    []int64 `json:"shape"`
+	// Quantization params for int8/uint8 models, in the v2 `parameters` map.
+	// Omitted for float models, so their response stays exactly as before.
+	Parameters map[string]any `json:"parameters,omitempty"`
 }
 
 type ServerLiveResponse struct {
@@ -168,7 +195,14 @@ func (oi *openInference) handleModelEndpoints(w http.ResponseWriter, r *http.Req
 
 	path := r.URL.Path
 
-	// Simple routing based on path suffix
+	// Simple routing based on path suffix. infer/ready validate the {model_name}
+	// segment like gRPC ModelReady does, instead of accepting any name.
+	if strings.HasSuffix(path, "/ready") || strings.HasSuffix(path, "/infer") {
+		if name := modelNameFromPath(path); name != oi.configuration.ModelName {
+			http.Error(w, "Model not found", http.StatusNotFound)
+			return
+		}
+	}
 	if strings.HasSuffix(path, "/ready") {
 		oi.handleModelReady(w, r)
 	} else if strings.HasSuffix(path, "/infer") {
@@ -178,6 +212,19 @@ func (oi *openInference) handleModelEndpoints(w http.ResponseWriter, r *http.Req
 	} else {
 		http.Error(w, "Not found", http.StatusNotFound)
 	}
+}
+
+// modelNameFromPath extracts {model_name} from /v2/models/{model_name}[/versions/{v}]/...
+func modelNameFromPath(path string) string {
+	const prefix = "/v2/models/"
+	if !strings.HasPrefix(path, prefix) {
+		return ""
+	}
+	rest := strings.TrimPrefix(path, prefix)
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		return rest[:i]
+	}
+	return rest
 }
 
 func (oi *openInference) handleServerMetadata(w http.ResponseWriter, r *http.Request) {
@@ -194,23 +241,46 @@ func (oi *openInference) handleServerMetadata(w http.ResponseWriter, r *http.Req
 	oi.writeJSONResponse(w, http.StatusOK, response)
 }
 
-func (oi *openInference) handleModelMetadata(w http.ResponseWriter, _ *http.Request) {
-	inputs := make([]RESTTensorMetadata, len(oi.configuration.InputTensors))
-	for i, tensor := range oi.configuration.InputTensors {
-		inputs[i] = RESTTensorMetadata{
-			Name:     tensor.Name,
-			Datatype: tensor.DataType,
-			Shape:    tensor.Shape,
+// modelTensors returns the signature to advertise: the model's own, when the runtime
+// can report it, otherwise the one declared in the function config. Runtimes that do
+// not implement TensorMetadataProvider therefore behave exactly as before.
+func (oi *openInference) modelTensors() (inputs, outputs []TensorDef) {
+	if oi.WorkerAllocator != nil {
+		for _, w := range oi.WorkerAllocator.GetWorkers() {
+			provider, ok := w.GetRuntime().(TensorMetadataProvider)
+			if !ok {
+				continue
+			}
+			if in, out := provider.ModelTensors(); len(in) > 0 || len(out) > 0 {
+				return in, out
+			}
 		}
 	}
+	return oi.configuration.InputTensors, oi.configuration.OutputTensors
+}
 
-	outputs := make([]RESTTensorMetadata, len(oi.configuration.OutputTensors))
-	for i, tensor := range oi.configuration.OutputTensors {
-		outputs[i] = RESTTensorMetadata{
-			Name:     tensor.Name,
-			Datatype: tensor.DataType,
-			Shape:    tensor.Shape,
+func toRESTTensorMetadata(t TensorDef) RESTTensorMetadata {
+	m := RESTTensorMetadata{Name: t.Name, Datatype: t.DataType, Shape: t.Shape}
+	if len(t.Scale) > 0 {
+		m.Parameters = map[string]any{"scale": t.Scale, "zero_point": t.ZeroPoint}
+		if t.QuantizedDimension != 0 {
+			m.Parameters["quantized_dimension"] = t.QuantizedDimension
 		}
+	}
+	return m
+}
+
+func (oi *openInference) handleModelMetadata(w http.ResponseWriter, _ *http.Request) {
+	inputTensors, outputTensors := oi.modelTensors()
+
+	inputs := make([]RESTTensorMetadata, len(inputTensors))
+	for i, tensor := range inputTensors {
+		inputs[i] = toRESTTensorMetadata(tensor)
+	}
+
+	outputs := make([]RESTTensorMetadata, len(outputTensors))
+	for i, tensor := range outputTensors {
+		outputs[i] = toRESTTensorMetadata(tensor)
 	}
 
 	response := ModelMetadataResponse{
@@ -234,9 +304,15 @@ func (oi *openInference) handleModelInfer(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Read request body
+	// Read request body, bounded to the same 512MB the gRPC server accepts so an
+	// oversized/unbounded body cannot OOM the pod (io.ReadAll grows in memory).
+	r.Body = http.MaxBytesReader(w, r.Body, 512*1024*1024)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		if _, tooLarge := err.(*http.MaxBytesError); tooLarge {
+			http.Error(w, "Request body too large (max 512MB)", http.StatusRequestEntityTooLarge)
+			return
+		}
 		oi.Logger.WarnWith("Failed to read request body", "error", err)
 		http.Error(w, "Failed to read request", http.StatusBadRequest)
 		return
@@ -245,7 +321,7 @@ func (oi *openInference) handleModelInfer(w http.ResponseWriter, r *http.Request
 
 	// Parse inference request
 	var inferRequest RESTInferenceRequest
-	if err := json.Unmarshal(body, &inferRequest); err != nil {
+	if err := decodeJSON(body, &inferRequest); err != nil {
 		oi.Logger.WarnWith("Failed to parse inference request", "error", err)
 		http.Error(w, "Invalid request format", http.StatusBadRequest)
 		return
@@ -260,6 +336,7 @@ func (oi *openInference) handleModelInfer(w http.ResponseWriter, r *http.Request
 	}
 
 	// Create nuclio event with the REST inference request as body
+	inferRequest.Inputs = nil
 	event := &Event{
 		body: body,
 		headers: map[string]any{
@@ -274,10 +351,13 @@ func (oi *openInference) handleModelInfer(w http.ResponseWriter, r *http.Request
 	}
 
 	// Submit to worker
+	// Worker-ALLOCATION timeout (not a processing timeout): with few workers and a
+	// slow inference in flight, concurrent requests wait here for a free worker —
+	// 60s lets them queue instead of failing fast at 10s.
 	response, submitError, processError := oi.AllocateWorkerAndSubmitEvent(
 		event,
 		oi.Logger,
-		10*time.Second,
+		60*time.Second,
 	)
 
 	if submitError != nil {
