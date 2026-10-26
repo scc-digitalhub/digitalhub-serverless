@@ -15,26 +15,18 @@ TVM is registered only when CGO is enabled. Generic processor builds with
 `CGO_ENABLED=0` keep the other runtimes and do not require the TVM libraries.
 
 It is the default serve image for a DigitalHub CORE **`tvm+serve`** run. **DigitalHub TVM
-Runtime Rust** behaves the same and can be used instead.
+Runtime Rust** implements the same inference protocol and can be used instead.
 
-```
- TVM_MODEL_DIR                     Nuclio processor
- ├── model.so        ──load──►   worker 1 ─ tvm runtime ─ model copy ─┐
- └── metadata.json               worker 2 ─ tvm runtime ─ model copy ─┤◄── openinference trigger
-                                 ...                                  │    REST :8080 · gRPC :9000
-                                 worker N ─ tvm runtime ─ model copy ─┘
-```
-
-Nothing model-specific is baked into the image. At startup the image writes the Nuclio
-configuration from the environment; each worker checks the model, loads its own copy and
-runs the inferences in-process.
+Each worker loads its own `model.so` and `metadata.json`, then executes one
+inference at a time. Workers provide parallel requests; `TVM_NUM_THREADS` controls
+threads within each inference. No model-specific image is needed.
 
 ## Quick start
 
 Download a model compiled by `tvm+compile` for your machine and start the image:
 
 ```bash
-dhcli download model -p my-project -n my-model-x86 -d ./my-model   # model.so + metadata.json
+dhcli download model -p my-project -n my-model-amd64 -d ./my-model   # model.so + metadata.json
 
 docker run --rm -p 8080:8080 -p 9000:9000 \
   -v "$PWD/my-model:/shared/model" \
@@ -68,18 +60,25 @@ Served by the `openinference` trigger of this repository.
 | Model metadata  | `GET /v2/models/<name>`                                     | `ModelMetadata`  |
 | Inference       | `POST /v2/models/<name>/infer` (also `/versions/<v>/infer`) | `ModelInfer`     |
 
+Read the metadata first and match its input names, datatypes, shapes and value
+counts. For a model with `x: FP32 [1,4]`, a complete request is:
+
 ```bash
 curl -X POST http://localhost:8080/v2/models/my-model/infer \
   -H 'Content-Type: application/json' \
-  -d '{"inputs":[{"name":"images","datatype":"FP32","shape":[1,3,640,640],"data":[...]}]}'
+  -d '{"inputs":[{"name":"x","datatype":"FP32","shape":[1,4],"data":[1.0,2.0,3.0,4.0]}]}'
 ```
+
+This example must be adapted for other signatures, including image models. Images
+must be preprocessed by the client; the server consumes tensors. The versioned
+inference route serves the same loaded model, not a model-version repository.
 
 - **Inputs** are matched by name when every input has one and the names match the model,
   otherwise by position. A missing `datatype` means `FP32`.
 - **Data types**: `FP32`, `FP64`, `INT8`, `INT16`, `INT32`, `INT64`, `UINT8`, `UINT16`,
   `UINT32`, `UINT64`.
   Integer JSON values retain full `INT64`/`UINT64` precision through REST and gRPC.
-- **Size limits**: 512 MB for a REST request and for a gRPC message.
+- **Size limits**: 512 MiB for a REST request and for a gRPC message.
 - **Quantized models** (`int8` / `uint8` tensors): the REST model metadata adds `scale`,
   `zero_point` and `quantized_dimension` under `parameters`, so the client can convert the
   values (`real = (q - zero_point) * scale`).
@@ -99,7 +98,6 @@ At startup the runtime refuses the model, with a clear error, unless:
 Runtime image builds cover `linux/amd64` (Intel/AMD 64-bit), `linux/arm64`
 (ARM 64-bit/AArch64) and `linux/arm/v7` (ARM 32-bit). CORE's `arm32` profile produces
 an ARMv7 hard-float model requiring NEON, for the `linux/arm/v7` runtime.
-All three platforms remain supported; the target rename removes none of them.
 
 Compile profiles live in CORE's `runtime-tvm.yaml`, not in this runtime. Go reads
 the effective target from the model, so adding a profile for an already compatible
@@ -113,20 +111,40 @@ for another platform or enable CUDA/GPU inference.
 
 ## Use from DigitalHub CORE
 
-It is the default serve image (`RUNTIME_TVM_SERVE`); a single `tvm+serve` run can choose
-another one with `image`. Configure `model_path`, `served_name`, `image`, `replicas`,
-`workers`, `service_type` and `service_name` in the CORE **Run** step, not in the reusable
-task. The runtime's environment variables and inference API are unchanged. CORE:
+Go is CORE's default `RUNTIME_TVM_SERVE` image. TVM-specific settings belong to
+the **Run**, while the Task supplies common Kubernetes settings. For example:
 
-- downloads the `tvm-so` Model into `TVM_MODEL_DIR` with an init container;
-- sets `TVM_MODEL_NAME`, `TVM_SERVE_WORKERS` and `TVM_NUM_THREADS` (the run CPUs divided by
-  the workers);
-- starts the pod on a node with the architecture of the model, where Kubernetes pulls the
-  matching variant of the image.
+```yaml
+kind: tvm+serve:run
+spec:
+  task: tvm+serve://my-project/<task-id>
+  image: ghcr.io/scc-digitalhub/tvm-runtime-go:0.26.0
+  served_name: my-model
+  workers: 1
+  resources: {cpu: "4", mem: 2Gi}
+```
 
-CORE's default init image covers only AMD64 and ARM64. Serving on an ARM32 cluster node
-also requires an ARMv7-compatible init image to download the model. Standalone serving
-with the model mounted into the runtime container does not use this init image.
+| Run option | Default | Effect |
+| --- | --- | --- |
+| `model_path` | Function `so_model` | Versioned `tvm-so` reference to serve; an explicit value wins. |
+| `served_name` | Function name | Model name in `/v2/models/<name>` and `TVM_MODEL_NAME`. |
+| `image` | `RUNTIME_TVM_SERVE` | Runtime image for this Run. |
+| `replicas` | `1` | Number of pods. |
+| `workers` | `1` | Model copies and parallel requests per pod. |
+| `service_type` | `ClusterIP` | Kubernetes Service type. |
+| `service_name` | unset | Additional Service name, `<function>-<service_name>`; does not rename the model. |
+
+CORE downloads the Model with an init container, sets the model/worker environment
+and derives TVM threads from the Run's CPUs divided by workers (at least one).
+`envs` can explicitly set `TVM_NUM_THREADS`. The Run `profile` selects scheduling
+settings, not a compile target. Its node selector must match the Model architecture
+and CPU requirements. The platform reports the endpoint in `status.inference_v2`.
+
+Runtime builds cover AMD64, ARM64 and ARMv7. CORE's default init image covers only
+AMD64/ARM64, so CORE serving on ARM32 also needs an ARMv7 init image. Standalone
+Docker serving with a mounted Model does not use it. See the
+[CORE guide](https://github.com/scc-digitalhub/digitalhub-core/tree/main/runtimes/runtime-tvm)
+for the Function/Task/Run relationship and target configuration.
 
 ## How it works
 
@@ -182,7 +200,7 @@ them with
 ## Limitations
 
 - CPU only, no GPU.
-- One model per processor; no batching.
+- One model per processor; no automatic request batching.
 - At most 64 output tensors per inference; larger results are rejected, never truncated.
 - `FP16` tensors are not supported yet.
 
