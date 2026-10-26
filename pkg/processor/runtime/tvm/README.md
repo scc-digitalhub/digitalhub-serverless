@@ -89,7 +89,7 @@ inference route serves the same loaded model, not a model-version repository.
 At startup the runtime refuses the model, with a clear error, unless:
 
 - `metadata.json` has the same `tvm_version` and `tvm_git_commit` as the TVM built into the
-  image: **compile with the DigitalHub TVM Toolkit of the same release**;
+  image: **compile with a DigitalHub TVM Toolkit containing the same TVM version and commit**;
 - the model was compiled for a Linux GNU/glibc CPU (LLVM target) of the image architecture;
 - `target_triple`, when present, agrees with the runtime, and the actual ELF library
   has the matching machine, 32/64-bit class and byte order;
@@ -163,21 +163,36 @@ and runs one inference at a time; parallelism comes from the number of workers.
 
 ## Versions and release
 
-**The image tag names the Apache TVM version**: git tag `tvm-0.26.0` builds
-`tvm-runtime-go:0.26.0` on Apache TVM `0.26.0`. Each architecture also gets its own tag:
-`0.26.0-amd64`, `0.26.0-arm64` and `0.26.0-armv7`. Do not create a GitHub Release for these
-tags: the releases of this repository publish its other runtimes.
+The workflow `.github/workflows/tvm-runtime-go-image.yml` can publish the current
+`main` with separate TVM and image versions. After the workflow changes reach `main`,
+run it manually from GitHub Actions, or:
 
-Pushing a tag `tvm-X.Y.Z` (or `tvm-X.Y`) starts `.github/workflows/tvm-runtime-go-image.yml`.
-For each architecture it:
+```bash
+gh workflow run tvm-runtime-go-image.yml --repo scc-digitalhub/digitalhub-serverless --ref main \
+  -f tvm_version=0.26.0 -f image_tag=0.26.0-r1
+```
 
-1. compiles only the TVM runtime (`libtvm_runtime.so`, `libtvm_ffi.so`) of Apache TVM
-   `vX.Y.Z`: natively on amd64 and arm64, cross-compiled for armv7;
-2. builds the processor with cgo, embedding the TVM version and commit;
-3. builds the image and checks the libraries inside it (`ldd` and SHA-256);
-4. pushes `<version>-<arch>`.
+`tvm_version` selects Apache TVM and its bundled FFI. `image_tag` names this runtime
+release: `0.26.0-r1` can include Go fixes while keeping TVM `0.26.0`. Use a new image
+tag for each release; image tags do not determine model compatibility. Manual runs
+accept only `main`, and all architecture jobs check out the exact commit selected
+when the run starts. Pushing to `main` alone does not publish an image.
 
-A last job publishes the multi-architecture tag.
+The legacy flow remains: pushing `tvm-X.Y.Z` (or `tvm-X.Y`) builds that Git tag and
+publishes `:X.Y.Z` (or `:X.Y`, using TVM `X.Y.0`). **Do not create a GitHub Release
+for these tags**: releases of this repository publish its other runtimes.
+
+For each of `amd64`, `arm64` and `armv7`, the workflow builds the TVM runtime and
+processor, verifies the platform and packaged library hashes, and pushes
+`<image_tag>-<arch>`. The final `<image_tag>` is published only after all builds pass.
+It uses their immutable digests and checks that all three images contain the same
+source commit and TVM/FFI versions and revisions. Failed architecture jobs can be
+retried within the same workflow run.
+
+`/opt/tvm/provenance.json` records the repository, source commit, image tag, TVM/FFI
+versions and commits, library hashes and workflow run. The image label
+`org.digitalhub.source.revision` identifies the Go source commit; the existing TVM
+revision label continues to identify Apache TVM.
 
 ## Development
 
