@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/nuclio/errors"
 	"github.com/nuclio/logger"
@@ -146,6 +147,9 @@ func (oi *openInference) startRESTServer() error {
 	oi.restServer = &http.Server{
 		Addr:    addr,
 		Handler: mux,
+		// Guard against slow-header clients holding sockets open; body reads are
+		// bounded per-handler with http.MaxBytesReader instead (big tensors are fine).
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	oi.Logger.InfoWith("Starting REST server", "address", addr)
@@ -165,7 +169,12 @@ func (oi *openInference) startGRPCServer() error {
 		return errors.Wrap(err, "Failed to create gRPC listener")
 	}
 
-	oi.grpcServer = grpc.NewServer()
+	// Raise the receive limit well above the 4MB grpc-go default: v2 inference
+	// tensors easily exceed it (a single 1x3x640x640 FP32 input is ~4.9MB); 512MB
+	// matches the rust serve backend. Send is left at the grpc-go default (~2GB).
+	oi.grpcServer = grpc.NewServer(
+		grpc.MaxRecvMsgSize(512 * 1024 * 1024),
+	)
 	oi.registerGRPCHandlers(oi.grpcServer)
 
 	oi.Logger.InfoWith("Starting gRPC server", "address", addr)

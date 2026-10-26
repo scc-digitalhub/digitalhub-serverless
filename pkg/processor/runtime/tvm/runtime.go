@@ -1,0 +1,301 @@
+/*
+SPDX-FileCopyrightText: © 2025 DSLab - Fondazione Bruno Kessler
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
+// Package tvm is a native Nuclio Go runtime serving a compiled TVM Relax model.so
+// over OpenInference v2, running inference in-process via cgo (package tvmrelax).
+package tvm
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"math"
+	"os"
+	"path/filepath"
+	goruntime "runtime"
+
+	"github.com/nuclio/errors"
+	"github.com/nuclio/logger"
+	nuclio "github.com/nuclio/nuclio-sdk-go"
+	"github.com/nuclio/nuclio/pkg/common/status"
+	"github.com/nuclio/nuclio/pkg/processor/runtime"
+
+	"github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/runtime/tvm/tvmrelax"
+	"github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/trigger/openinference"
+)
+
+const defaultModelDir = "/shared/model"
+
+// The Relax VM (and every tvm-ffi handle) is not thread-safe, so one dedicated
+// goroutine (modelLoop) owns the model on a single OS thread; ProcessEvent hands it
+// work over jobCh and waits on respCh (actor pattern, as the rust worker does).
+type inferJob struct {
+	inputs []tvmrelax.Tensor
+	respCh chan inferResult
+}
+
+type inferResult struct {
+	outputs []tvmrelax.Tensor
+	err     error
+}
+
+type tvmRuntime struct {
+	*runtime.AbstractRuntime // supplies every Runtime method except ProcessEvent/ProcessBatch
+	metadata                 modelMetadata
+	jobCh                    chan inferJob // ProcessEvent -> modelLoop
+}
+
+// NewRuntime loads the model and starts the single-threaded inference loop.
+func NewRuntime(parentLogger logger.Logger,
+	configuration *runtime.Configuration) (runtime.Runtime, error) {
+	abstract, err := runtime.NewAbstractRuntime(parentLogger, configuration)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to create abstract runtime")
+	}
+	r := &tvmRuntime{
+		AbstractRuntime: abstract,
+		jobCh:           make(chan inferJob),
+	}
+
+	modelDir := os.Getenv("TVM_MODEL_DIR")
+	if modelDir == "" {
+		modelDir = defaultModelDir
+	}
+
+	metaRaw, err := os.ReadFile(filepath.Join(modelDir, "metadata.json"))
+	if err != nil {
+		return nil, errors.Wrapf(err, "Failed to read metadata.json in %s", modelDir)
+	}
+	if err := json.Unmarshal(metaRaw, &r.metadata); err != nil {
+		return nil, errors.Wrap(err, "Failed to parse metadata.json")
+	}
+	if r.metadata.Entry == "" {
+		r.metadata.Entry = "main"
+	}
+	// fail fast if a model declares a dtype this image can't serve (mirrors rust).
+	checkDtype := func(t tensorSpec) error {
+		if t.Dtype != "" && !supportedTvmDtype(t.Dtype) {
+			return errors.Errorf("model tensor %q declares dtype %q: not supported by this serve image (FP16/others deferred)", t.Name, t.Dtype)
+		}
+		return nil
+	}
+	for _, t := range r.metadata.Inputs {
+		if err := checkDtype(t); err != nil {
+			return nil, err
+		}
+	}
+	for _, t := range r.metadata.Outputs {
+		if err := checkDtype(t); err != nil {
+			return nil, err
+		}
+	}
+	modelPath := filepath.Join(modelDir, "model.so")
+	if err := validateModelCompatibility(r.metadata, modelPath); err != nil {
+		return nil, errors.Wrap(err, "Incompatible TVM model")
+	}
+
+	// load + run on ONE dedicated OS thread (VM/ffi handles are not thread-safe).
+	ready := make(chan error, 1)
+	go r.modelLoop(modelDir, ready)
+	if err := <-ready; err != nil {
+		return nil, errors.Wrap(err, "Failed to load TVM model")
+	}
+
+	// TVM_NUM_THREADS sizes the TVM thread pool of this worker; when empty TVM uses every
+	// core. CORE splits the pod CPUs among the workers.
+	parentLogger.InfoWith("TVM runtime ready",
+		"modelDir", modelDir, "entry", r.metadata.Entry,
+		"inputs", len(r.metadata.Inputs), "outputs", len(r.metadata.Outputs),
+		"tvmNumThreads", os.Getenv("TVM_NUM_THREADS"))
+	r.SetStatus(status.Ready)
+	return r, nil
+}
+
+// ModelTensors reports the signature the model itself declares in metadata.json, read
+// at construction (so it is always populated by the time a worker exists). The
+// openinference trigger advertises this instead of the tensors declared in the
+// function config, which otherwise have to repeat — and can contradict — the model.
+// Implements openinference.TensorMetadataProvider.
+func (r *tvmRuntime) ModelTensors() (inputs, outputs []openinference.TensorDef) {
+	return toTensorDefs(r.metadata.Inputs), toTensorDefs(r.metadata.Outputs)
+}
+
+func toTensorDefs(specs []tensorSpec) []openinference.TensorDef {
+	defs := make([]openinference.TensorDef, 0, len(specs))
+	for _, s := range specs {
+		defs = append(defs, openinference.TensorDef{
+			Name:               s.Name,
+			DataType:           tvmToV2Name[s.Dtype],
+			Shape:              s.Shape,
+			Scale:              s.Scale,
+			ZeroPoint:          s.ZeroPoint,
+			QuantizedDimension: s.QuantizedDimension,
+		})
+	}
+	return defs
+}
+
+// modelLoop pins itself to one OS thread (the ffi ABI requires all calls on the
+// same thread), loads the model, reports on `ready`, then serves jobs one at a time.
+func (r *tvmRuntime) modelLoop(modelDir string, ready chan error) {
+	goruntime.LockOSThread()
+	defer goruntime.UnlockOSThread()
+
+	model, err := tvmrelax.Load(filepath.Join(modelDir, "model.so"), r.metadata.Entry)
+	ready <- err
+	if err != nil {
+		return
+	}
+	for job := range r.jobCh {
+		outs, inferErr := model.Infer(job.inputs)
+		job.respCh <- inferResult{outputs: outs, err: inferErr}
+	}
+}
+
+// ProcessEvent parses a v2 infer request, runs inference, returns the v2 response.
+func (r *tvmRuntime) ProcessEvent(event nuclio.Event,
+	functionLogger logger.Logger) (interface{}, error) {
+	// UseNumber keeps integer precision: plain decoding floats every number, losing
+	// bits above 2^53 for INT64.
+	dec := json.NewDecoder(bytes.NewReader(event.GetBody()))
+	dec.UseNumber()
+	var req openinference.RESTInferenceRequest
+	if err := dec.Decode(&req); err != nil {
+		return nil, errors.Wrap(err, "invalid inference request")
+	}
+
+	inputs, err := r.buildInputs(req.Inputs)
+	if err != nil {
+		return nil, err
+	}
+	req.Inputs = nil
+
+	job := inferJob{inputs: inputs, respCh: make(chan inferResult, 1)}
+	r.jobCh <- job
+	res := <-job.respCh
+	if res.err != nil {
+		return nil, errors.Wrap(res.err, "inference failed")
+	}
+
+	resp, err := r.buildResponse(req.ID, res.outputs)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to build response")
+	}
+	body, err := json.Marshal(resp)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to marshal response")
+	}
+	return nuclio.Response{
+		StatusCode:  200,
+		ContentType: "application/json",
+		Body:        body,
+	}, nil
+}
+
+func (r *tvmRuntime) buildInputs(in []openinference.RESTInferInputTensor) ([]tvmrelax.Tensor, error) {
+	// enforce arity up front (else the entry call fails later with an obscure FFI error).
+	if len(r.metadata.Inputs) > 0 && len(in) != len(r.metadata.Inputs) {
+		return nil, errors.Errorf("expected %d input tensor(s), got %d", len(r.metadata.Inputs), len(in))
+	}
+	in = orderInputs(in, r.metadata.Inputs)
+	out := make([]tvmrelax.Tensor, 0, len(in))
+	for i := range in {
+		t := &in[i]
+		datatype := t.Datatype
+		if datatype == "" {
+			datatype = "FP32" // default when a client omits it
+		}
+		code, bits, err := v2ToDLPack(datatype)
+		if err != nil {
+			return nil, errors.Wrapf(err, "input %q", t.Name)
+		}
+		nums, err := collectNumbers(t.Data)
+		if err != nil {
+			return nil, errors.Wrapf(err, "input %q data", t.Name)
+		}
+		// guard the FFI copy (mirrors rust validate_shape): reject negative dims,
+		// multiply with an overflow check, and require product(shape) == len(nums),
+		// else tvm_input_add reads past the packed buffer and crashes the worker.
+		n := int64(1)
+		for _, d := range t.Shape {
+			if d < 0 {
+				return nil, errors.Errorf("input %q has a negative dimension in shape %v", t.Name, t.Shape)
+			}
+			if d != 0 && n > math.MaxInt64/d {
+				return nil, errors.Errorf("input %q shape %v is too large", t.Name, t.Shape)
+			}
+			n *= d
+		}
+		if n != int64(len(nums)) {
+			return nil, errors.Errorf("input %q shape %v implies %d elements but %d were provided", t.Name, t.Shape, n, len(nums))
+		}
+		raw, err := encodeInputBytes(nums, datatype)
+		if err != nil {
+			return nil, errors.Wrapf(err, "input %q", t.Name)
+		}
+		out = append(out, tvmrelax.Tensor{Shape: t.Shape, Code: code, Bits: bits, Data: raw})
+	}
+	return out, nil
+}
+
+// Match complete names to metadata; otherwise keep positional order.
+func orderInputs(inputs []openinference.RESTInferInputTensor, specs []tensorSpec) []openinference.RESTInferInputTensor {
+	if len(specs) == 0 {
+		return inputs
+	}
+	byName := make(map[string]int, len(inputs))
+	for i, input := range inputs {
+		if input.Name == "" {
+			return inputs
+		}
+		byName[input.Name] = i
+	}
+	if len(byName) != len(specs) {
+		return inputs
+	}
+	ordered := make([]openinference.RESTInferInputTensor, len(specs))
+	for i, spec := range specs {
+		index, found := byName[spec.Name]
+		if !found {
+			return inputs
+		}
+		ordered[i] = inputs[index]
+	}
+	return ordered
+}
+
+// buildResponse decodes each output using its actual dtype (from the tensor, not
+// the metadata), so a model returning e.g. INT64 indices reports INT64.
+func (r *tvmRuntime) buildResponse(id string, outs []tvmrelax.Tensor) (openinference.RESTInferenceResponse, error) {
+	resp := openinference.RESTInferenceResponse{ID: id, Outputs: make([]openinference.RESTInferOutputTensor, len(outs))}
+	for i, o := range outs {
+		name := fmt.Sprintf("output_%d", i)
+		if i < len(r.metadata.Outputs) && r.metadata.Outputs[i].Name != "" {
+			name = r.metadata.Outputs[i].Name
+		}
+		datatype, err := dlpackToV2(int(o.Code), int(o.Bits))
+		if err != nil {
+			return openinference.RESTInferenceResponse{}, errors.Wrapf(err, "output %q", name)
+		}
+		data, err := decodeOutputData(o.Data, datatype)
+		if err != nil {
+			return openinference.RESTInferenceResponse{}, errors.Wrapf(err, "output %q", name)
+		}
+		resp.Outputs[i] = openinference.RESTInferOutputTensor{
+			Name:     name,
+			Shape:    o.Shape,
+			Datatype: datatype,
+			Data:     data,
+		}
+	}
+	return resp, nil
+}
+
+// ProcessBatch is not supported (single-event openinference serving).
+func (r *tvmRuntime) ProcessBatch(batch []nuclio.Event,
+	functionLogger logger.Logger) ([]*runtime.ResponseWithErrors, error) {
+	return nil, nuclio.ErrNotImplemented
+}

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nuclio/nuclio-sdk-go"
 	"github.com/nuclio/nuclio/pkg/common"
 	"github.com/nuclio/nuclio/pkg/common/status"
 	"github.com/nuclio/nuclio/pkg/functionconfig"
@@ -235,6 +236,14 @@ func (t *testTrigger) SignalWorkersToTerminate() error {
 func (t *testTrigger) SignalWorkersToContinue() error {
 	t.Called()
 	return nil
+}
+
+func (t *testTrigger) PreBatchHooks(batch []nuclio.Event, workerInstance *worker.Worker) {
+	t.Called(batch, workerInstance)
+}
+
+func (t *testTrigger) PostBatchHooks(batch []nuclio.Event, workerInstance *worker.Worker) {
+	t.Called(batch, workerInstance)
 }
 
 func TestTriggerTestSuite(t *testing.T) {
