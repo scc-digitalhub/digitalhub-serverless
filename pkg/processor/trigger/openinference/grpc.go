@@ -270,6 +270,12 @@ func (s *grpcInferenceServer) convertRESTToGRPCResponse(resp *RESTInferenceRespo
 		Outputs:      make([]*pb.ModelInferResponse_InferOutputTensor, len(resp.Outputs)),
 	}
 
+	if grpcResp.ModelName == "" {
+		grpcResp.ModelName = s.trigger.configuration.ModelName
+	}
+	if grpcResp.ModelVersion == "" {
+		grpcResp.ModelVersion = s.trigger.configuration.ModelVersion
+	}
 	if grpcResp.Id == "" {
 		grpcResp.Id = requestID
 	}
