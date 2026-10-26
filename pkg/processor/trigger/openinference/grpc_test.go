@@ -104,6 +104,46 @@ func TestGRPCModelMetadata(t *testing.T) {
 	assert.Equal(t, "output", resp.Outputs[0].Name)
 }
 
+func TestConvertRESTToGRPCResponseMetadata(t *testing.T) {
+	oi := createTestOpenInferenceTrigger(t)
+	oi.configuration.ModelName = "configured-model"
+	oi.configuration.ModelVersion = "42"
+	server := &grpcInferenceServer{trigger: oi}
+
+	for _, test := range []struct {
+		name         string
+		response     RESTInferenceResponse
+		modelName    string
+		modelVersion string
+		id           string
+	}{
+		{
+			name: "configuration defaults", response: RESTInferenceResponse{},
+			modelName: "configured-model", modelVersion: "42", id: "request-id",
+		},
+		{
+			name:      "explicit response values",
+			response:  RESTInferenceResponse{ModelName: "response-model", ModelVersion: "7", ID: "response-id"},
+			modelName: "response-model", modelVersion: "7", id: "response-id",
+		},
+		{
+			name: "missing name", response: RESTInferenceResponse{ModelVersion: "7"},
+			modelName: "configured-model", modelVersion: "7", id: "request-id",
+		},
+		{
+			name: "missing version", response: RESTInferenceResponse{ModelName: "response-model"},
+			modelName: "response-model", modelVersion: "42", id: "request-id",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := server.convertRESTToGRPCResponse(&test.response, "request-id")
+			assert.Equal(t, test.modelName, response.ModelName)
+			assert.Equal(t, test.modelVersion, response.ModelVersion)
+			assert.Equal(t, test.id, response.Id)
+		})
+	}
+}
+
 func TestConvertTensorContentsWithContents(t *testing.T) {
 	oi := createTestOpenInferenceTrigger(t)
 	server := &grpcInferenceServer{trigger: oi}
