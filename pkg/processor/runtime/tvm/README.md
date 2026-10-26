@@ -11,6 +11,9 @@ The image **`ghcr.io/scc-digitalhub/tvm-runtime-go`** serves a model compiled by
 port `8080` and gRPC on port `9000`. Inside it runs the Nuclio processor of this repository
 with the `tvm` runtime of this folder, which calls TVM through cgo, with no Python.
 
+TVM is registered only when CGO is enabled. Generic processor builds with
+`CGO_ENABLED=0` keep the other runtimes and do not require the TVM libraries.
+
 It is the default serve image for a DigitalHub CORE **`tvm+serve`** run. **DigitalHub TVM
 Runtime Rust** behaves the same and can be used instead.
 
