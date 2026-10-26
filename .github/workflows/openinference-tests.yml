@@ -1,0 +1,43 @@
+name: Test OpenInference
+
+on:
+  pull_request:
+    paths:
+      - "**/*.go"
+      - "**/*.proto"
+      - "**/testdata/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/openinference-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "**/*.go"
+      - "**/*.proto"
+      - "**/testdata/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/openinference-tests.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GOFLAGS: -mod=readonly
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - name: Test OpenInference
+        run: go test ./pkg/processor/trigger/openinference
