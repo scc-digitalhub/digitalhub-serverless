@@ -31,7 +31,7 @@ dhcli download model -p my-project -n my-model-amd64 -d ./my-model   # model.so 
 docker run --rm -p 8080:8080 -p 9000:9000 \
   -v "$PWD/my-model:/shared/model" \
   -e TVM_MODEL_NAME=my-model \
-  ghcr.io/scc-digitalhub/tvm-runtime-go:0.26.0-r2
+  ghcr.io/scc-digitalhub/tvm-runtime-go:0.26.0-r3
 
 curl http://localhost:8080/v2/models/my-model
 ```
@@ -47,10 +47,10 @@ curl http://localhost:8080/v2/models/my-model
 | `TVM_SERVE_PORT`      | `8080`          | REST port.                                                                       |
 | `TVM_SERVE_GRPC_PORT` | `9000`          | gRPC port.                                                                       |
 
-Size workers, CPU and memory for the expected concurrency. With the **unreleased
-source fixes**, a request waiting for a free Nuclio worker returns HTTP `503` /
-gRPC `RESOURCE_EXHAUSTED` when worker allocation times out. The published
-`0.26.0-r2` image can return HTTP `500` for this condition. This capacity error is
+Size workers, CPU and memory for the expected concurrency. In `0.26.0-r3`, a
+request waiting for a free Nuclio worker returns HTTP `503` / gRPC
+`RESOURCE_EXHAUSTED` when worker allocation times out. The older `0.26.0-r2`
+image can return HTTP `500` for this condition. This capacity error is
 separate from invalid input. Native TVM execution failures retain their existing
 HTTP `500` / gRPC `UNKNOWN` behavior.
 
@@ -91,9 +91,9 @@ inference route serves the same loaded model, not a model-version repository.
   values (`real = (q - zero_point) * scale`).
 - **gRPC clients** use the proto `pkg/proto/inference/v2/grpc_service.proto`.
 
-### Input validation (source changes, not yet released)
+### Input validation
 
-The source validates the model's datatype, rank and static dimensions before
+The runtime validates the model's datatype, rank and static dimensions before
 calling TVM. Negative metadata dimensions are dynamic; request dimensions must
 be nonnegative. Input names still use the positional fallback described above.
 Invalid input returns HTTP `400` / gRPC `INVALID_ARGUMENT`, including wrong
@@ -104,11 +104,11 @@ without truncating fractional values or wrapping overflow.
 gRPC accepts either typed `contents` or little-endian `raw_input_contents`,
 never both. Typed contents must use the field matching the declared datatype.
 Raw encoding requires exactly one buffer per input; malformed buffers are
-rejected. Unknown or empty model names return `NOT_FOUND`, including
-metadata requests.
+rejected. gRPC inference and metadata requests with unknown or empty model names
+return `NOT_FOUND`; `ModelReady` returns `ready: false`.
 
-These validation fixes require a new runtime build. The published `0.26.0-r2`
-image in the examples does not include them. No model recompilation is needed
+These validation fixes are included in `0.26.0-r3`; the older `0.26.0-r2`
+image does not include them. No model recompilation is needed
 when the TVM version and revision remain unchanged.
 
 ## Which models it serves
@@ -138,14 +138,16 @@ for another platform or enable CUDA/GPU inference.
 
 ## Use from DigitalHub CORE
 
-Go is CORE's default `RUNTIME_TVM_SERVE` image. TVM-specific settings belong to
-the **Run**, while the Task supplies common Kubernetes settings. For example:
+Go is CORE's default `RUNTIME_TVM_SERVE` image. To select this release, set
+`RUNTIME_TVM_SERVE=ghcr.io/scc-digitalhub/tvm-runtime-go:0.26.0-r3` on CORE or set
+`image` on one serve Run. TVM-specific settings belong to the **Run**, while the
+Task supplies common Kubernetes settings. For example:
 
 ```yaml
 kind: tvm+serve:run
 spec:
   task: tvm+serve://my-project/<task-id>
-  image: ghcr.io/scc-digitalhub/tvm-runtime-go:0.26.0-r2
+  image: ghcr.io/scc-digitalhub/tvm-runtime-go:0.26.0-r3
   served_name: my-model
   workers: 1
   resources: {cpu: "4", mem: 2Gi}
@@ -190,17 +192,19 @@ and runs one inference at a time; parallelism comes from the number of workers.
 
 ## Versions and release
 
+The current published runtime image is `0.26.0-r3`, built with Apache TVM `0.26.0`.
 The workflow `.github/workflows/tvm-runtime-go-image.yml` can publish the current
-`main` with separate TVM and image versions. After the workflow changes reach `main`,
-run it manually from GitHub Actions, or:
+`main` with separate TVM and image versions. Choose a new, unused image tag for
+the next release, then run it manually from GitHub Actions, or replace
+`<new-image-tag>` below:
 
 ```bash
 gh workflow run tvm-runtime-go-image.yml --repo scc-digitalhub/digitalhub-serverless --ref main \
-  -f tvm_version=0.26.0 -f image_tag=0.26.0-r1
+  -f tvm_version=0.26.0 -f image_tag='<new-image-tag>'
 ```
 
 `tvm_version` selects Apache TVM and its bundled FFI. `image_tag` names this runtime
-release: `0.26.0-r1` can include Go fixes while keeping TVM `0.26.0`. Use a new image
+release and can change independently of TVM `0.26.0`. Use a new image
 tag for each release; image tags do not determine model compatibility. Manual runs
 accept only `main`, and all architecture jobs check out the exact commit selected
 when the run starts. Pushing to `main` alone does not publish an image.
@@ -211,9 +215,10 @@ for these tags**: releases of this repository publish its other runtimes.
 
 For each of `amd64`, `arm64` and `armv7`, the workflow builds the TVM runtime and
 processor, verifies the platform and packaged library hashes, and pushes
-`<image_tag>-<arch>`. The final `<image_tag>` is published only after all builds pass.
-It uses their immutable digests and checks that all three images contain the same
-source commit and TVM/FFI versions and revisions. Failed architecture jobs can be
+`<image_tag>-<arch>`. On native `amd64` and `arm64` jobs, it also runs the TVM runtime
+and Open Inference transport tests. The final `<image_tag>` is published only after
+all builds pass. It uses their immutable digests and checks that all three images
+contain the same source commit and TVM/FFI versions and revisions. Failed architecture jobs can be
 retried within the same workflow run.
 
 `/opt/tvm/provenance.json` records the repository, source commit, image tag, TVM/FFI
