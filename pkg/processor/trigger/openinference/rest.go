@@ -362,13 +362,15 @@ func (oi *openInference) handleModelInfer(w http.ResponseWriter, r *http.Request
 
 	if submitError != nil {
 		oi.Logger.WarnWith("Failed to submit event", "error", submitError)
-		http.Error(w, "Failed to process request", http.StatusInternalServerError)
+		code, message := inferenceHTTPError(submitError)
+		http.Error(w, message, code)
 		return
 	}
 
 	if processError != nil {
 		oi.Logger.WarnWith("Failed to process event", "error", processError)
-		http.Error(w, "Failed to process request", http.StatusInternalServerError)
+		code, message := inferenceHTTPError(processError)
+		http.Error(w, message, code)
 		return
 	}
 
