@@ -79,6 +79,9 @@ func (s *grpcInferenceServer) ServerMetadata(ctx context.Context, req *pb.Server
 
 // ModelMetadata - Get model metadata
 func (s *grpcInferenceServer) ModelMetadata(ctx context.Context, req *pb.ModelMetadataRequest) (*pb.ModelMetadataResponse, error) {
+	if req.Name != s.trigger.configuration.ModelName {
+		return nil, status.Errorf(codes.NotFound, "model '%s' not found", req.Name)
+	}
 	// Same source as REST: the model's own signature when the runtime reports it.
 	// The v2 proto generated here has no `parameters` field on TensorMetadata, so
 	// quantization params stay REST-only for now
@@ -116,17 +119,21 @@ func (s *grpcInferenceServer) ModelMetadata(ctx context.Context, req *pb.ModelMe
 // ModelInfer - Perform inference using a specific model
 func (s *grpcInferenceServer) ModelInfer(ctx context.Context, req *pb.ModelInferRequest) (*pb.ModelInferResponse, error) {
 	// Validate the requested model name (mirrors ModelReady and the REST path).
-	if req.ModelName != "" && req.ModelName != s.trigger.configuration.ModelName {
+	if req.ModelName != s.trigger.configuration.ModelName {
 		return nil, status.Errorf(codes.NotFound, "model '%s' not found", req.ModelName)
 	}
 	// Convert gRPC request to REST format for processing
-	restRequest := s.convertGRPCToRESTRequest(req)
+	restRequest, err := s.convertGRPCToRESTRequest(req)
+	if err != nil {
+		s.trigger.Logger.WarnWith("Invalid inference request", "error", err)
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 
 	// Marshal to JSON for the event body
 	body, err := Serialize(restRequest)
 	if err != nil {
 		s.trigger.Logger.WarnWith("Failed to marshal request", "error", err)
-		return nil, err
+		return nil, status.Error(codes.InvalidArgument, "invalid tensor values")
 	}
 
 	// Create nuclio event
@@ -154,12 +161,12 @@ func (s *grpcInferenceServer) ModelInfer(ctx context.Context, req *pb.ModelInfer
 
 	if submitError != nil {
 		s.trigger.Logger.WarnWith("Failed to submit event", "error", submitError)
-		return nil, submitError
+		return nil, inferenceGRPCError(submitError)
 	}
 
 	if processError != nil {
 		s.trigger.Logger.WarnWith("Failed to process event", "error", processError)
-		return nil, processError
+		return nil, inferenceGRPCError(processError)
 	}
 
 	// Convert response to gRPC format
@@ -196,7 +203,10 @@ func convertParametersToMap(params map[string]*pb.InferParameter) map[string]any
 }
 
 // Helper to convert gRPC request to REST request
-func (s *grpcInferenceServer) convertGRPCToRESTRequest(req *pb.ModelInferRequest) *RESTInferenceRequest {
+func (s *grpcInferenceServer) convertGRPCToRESTRequest(req *pb.ModelInferRequest) (*RESTInferenceRequest, error) {
+	if len(req.RawInputContents) != 0 && len(req.RawInputContents) != len(req.Inputs) {
+		return nil, fmt.Errorf("raw_input_contents must contain one entry per input")
+	}
 	restReq := &RESTInferenceRequest{
 		ID:         req.Id,
 		Parameters: make(map[string]any),
@@ -218,12 +228,16 @@ func (s *grpcInferenceServer) convertGRPCToRESTRequest(req *pb.ModelInferRequest
 
 	// Convert input tensors
 	for i, input := range req.Inputs {
+		data, err := s.convertTensorContents(input.Contents, req.RawInputContents, i, input.Datatype, input.Shape)
+		if err != nil {
+			return nil, fmt.Errorf("input[%d]: %w", i, err)
+		}
 		restReq.Inputs[i] = RESTInferInputTensor{
 			Name:       input.Name,
 			Shape:      input.Shape,
 			Datatype:   input.Datatype,
 			Parameters: make(map[string]any),
-			Data:       s.convertTensorContents(input.Contents, req.RawInputContents, i, input.Datatype, input.Shape),
+			Data:       data,
 		}
 
 		for key, param := range input.Parameters {
@@ -257,7 +271,7 @@ func (s *grpcInferenceServer) convertGRPCToRESTRequest(req *pb.ModelInferRequest
 		}
 	}
 
-	return restReq
+	return restReq, nil
 }
 
 // Helper to convert REST response to gRPC response
@@ -340,39 +354,53 @@ func (s *grpcInferenceServer) convertRESTToGRPCResponse(resp *RESTInferenceRespo
 }
 
 // Helper to convert tensor contents from protobuf to generic data
-func (s *grpcInferenceServer) convertTensorContents(contents *pb.InferTensorContents, rawInputContents [][]byte, index int, datatype string, shape []int64) any {
+func (s *grpcInferenceServer) convertTensorContents(contents *pb.InferTensorContents, rawInputContents [][]byte, index int, datatype string, shape []int64) (any, error) {
+	if contents != nil && len(rawInputContents) != 0 {
+		return nil, fmt.Errorf("contents and raw_input_contents are mutually exclusive")
+	}
 	if contents != nil {
 		switch datatype {
 		case "BOOL":
-			return contents.BoolContents
+			return validatedTensorContents(contents, contents.BoolContents, datatype)
 		case "INT8", "INT16", "INT32":
-			return contents.IntContents
+			return validatedTensorContents(contents, contents.IntContents, datatype)
 		case "INT64":
-			return contents.Int64Contents
+			return validatedTensorContents(contents, contents.Int64Contents, datatype)
 		case "UINT8", "UINT16", "UINT32":
-			return contents.UintContents
+			return validatedTensorContents(contents, contents.UintContents, datatype)
 		case "UINT64":
-			return contents.Uint64Contents
+			return validatedTensorContents(contents, contents.Uint64Contents, datatype)
 		case "FP32":
-			return contents.Fp32Contents
+			return validatedTensorContents(contents, contents.Fp32Contents, datatype)
 		case "FP64":
-			return contents.Fp64Contents
+			return validatedTensorContents(contents, contents.Fp64Contents, datatype)
 		case "BYTES":
-			return contents.BytesContents
+			return validatedTensorContents(contents, contents.BytesContents, datatype)
 		default:
-			return nil
+			return nil, fmt.Errorf("unsupported datatype %q", datatype)
 		}
-	} else if rawInputContents != nil && index < len(rawInputContents) {
+	} else if index >= 0 && index < len(rawInputContents) {
 		// If contents is nil, try to convert raw input byte array contents based on datatype
 		rawData := rawInputContents[index]
-		res, err := BytesToTensor(datatype, rawData, shape)
-		if err != nil {
-			return nil
-		}
-		return res
+		return BytesToTensor(datatype, rawData, shape)
 	}
 
-	return nil
+	return nil, fmt.Errorf("no contents and no raw_input_contents")
+}
+
+func validatedTensorContents[T any](contents *pb.InferTensorContents, selected []T, datatype string) ([]T, error) {
+	count := len(contents.BoolContents) + len(contents.IntContents) + len(contents.Int64Contents) +
+		len(contents.UintContents) + len(contents.Uint64Contents) + len(contents.Fp32Contents) +
+		len(contents.Fp64Contents) + len(contents.BytesContents)
+	if count != len(selected) {
+		return nil, fmt.Errorf("contents do not match datatype %q", datatype)
+	}
+	// Empty repeated protobuf fields decode as nil; preserve an empty tensor as
+	// JSON [] rather than null, matching the raw tensor representation.
+	if selected == nil {
+		return []T{}, nil
+	}
+	return selected, nil
 }
 
 // Helper to convert generic data to tensor contents protobuf

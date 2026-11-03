@@ -152,7 +152,8 @@ func TestConvertTensorContentsWithContents(t *testing.T) {
 		contents := &pb.InferTensorContents{
 			BoolContents: []bool{true, false, true},
 		}
-		result := server.convertTensorContents(contents, nil, 0, "BOOL", []int64{1, 3})
+		result, err := server.convertTensorContents(contents, nil, 0, "BOOL", []int64{1, 3})
+		assert.NoError(t, err)
 		assert.Equal(t, []bool{true, false, true}, result)
 	})
 
@@ -160,7 +161,8 @@ func TestConvertTensorContentsWithContents(t *testing.T) {
 		contents := &pb.InferTensorContents{
 			IntContents: []int32{1, 2, 3, 4},
 		}
-		result := server.convertTensorContents(contents, nil, 0, "INT32", []int64{1, 4})
+		result, err := server.convertTensorContents(contents, nil, 0, "INT32", []int64{1, 4})
+		assert.NoError(t, err)
 		assert.Equal(t, []int32{1, 2, 3, 4}, result)
 	})
 
@@ -168,7 +170,8 @@ func TestConvertTensorContentsWithContents(t *testing.T) {
 		contents := &pb.InferTensorContents{
 			Int64Contents: []int64{100, 200, 300},
 		}
-		result := server.convertTensorContents(contents, nil, 0, "INT64", []int64{1, 3})
+		result, err := server.convertTensorContents(contents, nil, 0, "INT64", []int64{1, 3})
+		assert.NoError(t, err)
 		assert.Equal(t, []int64{100, 200, 300}, result)
 	})
 
@@ -176,7 +179,8 @@ func TestConvertTensorContentsWithContents(t *testing.T) {
 		contents := &pb.InferTensorContents{
 			UintContents: []uint32{10, 20, 30},
 		}
-		result := server.convertTensorContents(contents, nil, 0, "UINT32", []int64{1, 3})
+		result, err := server.convertTensorContents(contents, nil, 0, "UINT32", []int64{1, 3})
+		assert.NoError(t, err)
 		assert.Equal(t, []uint32{10, 20, 30}, result)
 	})
 
@@ -184,7 +188,8 @@ func TestConvertTensorContentsWithContents(t *testing.T) {
 		contents := &pb.InferTensorContents{
 			Uint64Contents: []uint64{1000, 2000, 3000},
 		}
-		result := server.convertTensorContents(contents, nil, 0, "UINT64", []int64{1, 3})
+		result, err := server.convertTensorContents(contents, nil, 0, "UINT64", []int64{1, 3})
+		assert.NoError(t, err)
 		assert.Equal(t, []uint64{1000, 2000, 3000}, result)
 	})
 
@@ -192,7 +197,8 @@ func TestConvertTensorContentsWithContents(t *testing.T) {
 		contents := &pb.InferTensorContents{
 			Fp32Contents: []float32{1.5, 2.5, 3.5},
 		}
-		result := server.convertTensorContents(contents, nil, 0, "FP32", []int64{1, 3})
+		result, err := server.convertTensorContents(contents, nil, 0, "FP32", []int64{1, 3})
+		assert.NoError(t, err)
 		assert.Equal(t, []float32{1.5, 2.5, 3.5}, result)
 	})
 
@@ -200,7 +206,8 @@ func TestConvertTensorContentsWithContents(t *testing.T) {
 		contents := &pb.InferTensorContents{
 			Fp64Contents: []float64{1.123, 2.456, 3.789},
 		}
-		result := server.convertTensorContents(contents, nil, 0, "FP64", []int64{1, 3})
+		result, err := server.convertTensorContents(contents, nil, 0, "FP64", []int64{1, 3})
+		assert.NoError(t, err)
 		assert.Equal(t, []float64{1.123, 2.456, 3.789}, result)
 	})
 
@@ -208,7 +215,8 @@ func TestConvertTensorContentsWithContents(t *testing.T) {
 		contents := &pb.InferTensorContents{
 			BytesContents: [][]byte{[]byte("hello"), []byte("world")},
 		}
-		result := server.convertTensorContents(contents, nil, 0, "BYTES", []int64{1, 2})
+		result, err := server.convertTensorContents(contents, nil, 0, "BYTES", []int64{1, 2})
+		assert.NoError(t, err)
 		assert.Equal(t, [][]byte{[]byte("hello"), []byte("world")}, result)
 	})
 }
@@ -220,7 +228,8 @@ func TestConvertTensorContentsWithRawContents(t *testing.T) {
 	t.Run("BOOL", func(t *testing.T) {
 		rawData := []byte{1, 0, 1}
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "BOOL", []int64{1, 3})
+		result, err := server.convertTensorContents(nil, rawInputContents, 0, "BOOL", []int64{1, 3})
+		assert.NoError(t, err)
 		assert.Equal(t, []bool{true, false, true}, result)
 	})
 
@@ -230,7 +239,8 @@ func TestConvertTensorContentsWithRawContents(t *testing.T) {
 		rawData[1] = 254 // -2 as uint8
 		rawData[2] = 3
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "INT8", []int64{1, 3})
+		result, err := server.convertTensorContents(nil, rawInputContents, 0, "INT8", []int64{1, 3})
+		assert.NoError(t, err)
 		expected := []int{1, -2, 3}
 		assert.Equal(t, expected, result)
 	})
@@ -238,7 +248,8 @@ func TestConvertTensorContentsWithRawContents(t *testing.T) {
 	t.Run("UINT8", func(t *testing.T) {
 		rawData := []byte{10, 20, 30}
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "UINT8", []int64{1, 3})
+		result, err := server.convertTensorContents(nil, rawInputContents, 0, "UINT8", []int64{1, 3})
+		assert.NoError(t, err)
 		expected := []int{10, 20, 30}
 		assert.Equal(t, expected, result)
 	})
@@ -250,7 +261,8 @@ func TestConvertTensorContentsWithRawContents(t *testing.T) {
 			binary.LittleEndian.PutUint16(rawData[i*2:i*2+2], uint16(v))
 		}
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "INT16", []int64{1, 3})
+		result, err := server.convertTensorContents(nil, rawInputContents, 0, "INT16", []int64{1, 3})
+		assert.NoError(t, err)
 		assert.Equal(t, []int16{100, -200, 300}, result)
 	})
 
@@ -260,7 +272,8 @@ func TestConvertTensorContentsWithRawContents(t *testing.T) {
 		binary.LittleEndian.PutUint16(rawData[2:4], 200)
 		binary.LittleEndian.PutUint16(rawData[4:6], 300)
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "UINT16", []int64{1, 3})
+		result, err := server.convertTensorContents(nil, rawInputContents, 0, "UINT16", []int64{1, 3})
+		assert.NoError(t, err)
 		assert.Equal(t, []uint16{100, 200, 300}, result)
 	})
 
@@ -271,7 +284,8 @@ func TestConvertTensorContentsWithRawContents(t *testing.T) {
 			binary.LittleEndian.PutUint32(rawData[i*4:i*4+4], uint32(v))
 		}
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "INT32", []int64{1, 3})
+		result, err := server.convertTensorContents(nil, rawInputContents, 0, "INT32", []int64{1, 3})
+		assert.NoError(t, err)
 		assert.Equal(t, []int32{1000, -2000, 3000}, result)
 	})
 
@@ -281,7 +295,8 @@ func TestConvertTensorContentsWithRawContents(t *testing.T) {
 		binary.LittleEndian.PutUint32(rawData[4:8], 2000)
 		binary.LittleEndian.PutUint32(rawData[8:12], 3000)
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "UINT32", []int64{1, 3})
+		result, err := server.convertTensorContents(nil, rawInputContents, 0, "UINT32", []int64{1, 3})
+		assert.NoError(t, err)
 		assert.Equal(t, []uint32{1000, 2000, 3000}, result)
 	})
 
@@ -292,7 +307,8 @@ func TestConvertTensorContentsWithRawContents(t *testing.T) {
 			binary.LittleEndian.PutUint64(rawData[i*8:i*8+8], uint64(v))
 		}
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "INT64", []int64{1, 3})
+		result, err := server.convertTensorContents(nil, rawInputContents, 0, "INT64", []int64{1, 3})
+		assert.NoError(t, err)
 		assert.Equal(t, []int64{10000, -20000, 30000}, result)
 	})
 
@@ -302,7 +318,8 @@ func TestConvertTensorContentsWithRawContents(t *testing.T) {
 		binary.LittleEndian.PutUint64(rawData[8:16], 20000)
 		binary.LittleEndian.PutUint64(rawData[16:24], 30000)
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "UINT64", []int64{1, 3})
+		result, err := server.convertTensorContents(nil, rawInputContents, 0, "UINT64", []int64{1, 3})
+		assert.NoError(t, err)
 		assert.Equal(t, []uint64{10000, 20000, 30000}, result)
 	})
 
@@ -312,7 +329,8 @@ func TestConvertTensorContentsWithRawContents(t *testing.T) {
 		binary.LittleEndian.PutUint32(rawData[4:8], math.Float32bits(2.5))
 		binary.LittleEndian.PutUint32(rawData[8:12], math.Float32bits(3.5))
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "FP32", []int64{1, 3})
+		result, err := server.convertTensorContents(nil, rawInputContents, 0, "FP32", []int64{1, 3})
+		assert.NoError(t, err)
 		assert.Equal(t, []float32{1.5, 2.5, 3.5}, result)
 	})
 
@@ -322,25 +340,29 @@ func TestConvertTensorContentsWithRawContents(t *testing.T) {
 		binary.LittleEndian.PutUint64(rawData[8:16], math.Float64bits(2.456))
 		binary.LittleEndian.PutUint64(rawData[16:24], math.Float64bits(3.789))
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "FP64", []int64{1, 3})
+		result, err := server.convertTensorContents(nil, rawInputContents, 0, "FP64", []int64{1, 3})
+		assert.NoError(t, err)
 		assert.Equal(t, []float64{1.123, 2.456, 3.789}, result)
 	})
 
 	t.Run("BYTES", func(t *testing.T) {
 		rawData := []byte("hello world")
 		rawInputContents := [][]byte{rawData}
-		result := server.convertTensorContents(nil, rawInputContents, 0, "BYTES", []int64{1, 11})
+		result, err := server.convertTensorContents(nil, rawInputContents, 0, "BYTES", []int64{1, 11})
+		assert.NoError(t, err)
 		assert.Equal(t, [][]byte{[]byte("hello world")}, result)
 	})
 
 	t.Run("NilContents", func(t *testing.T) {
-		result := server.convertTensorContents(nil, nil, 0, "FP32", []int64{1, 3})
+		result, err := server.convertTensorContents(nil, nil, 0, "FP32", []int64{1, 3})
+		assert.Error(t, err)
 		assert.Nil(t, result)
 	})
 
 	t.Run("IndexOutOfRange", func(t *testing.T) {
 		rawInputContents := [][]byte{[]byte{1, 2, 3}}
-		result := server.convertTensorContents(nil, rawInputContents, 5, "INT8", []int64{1, 3})
+		result, err := server.convertTensorContents(nil, rawInputContents, 5, "INT8", []int64{1, 3})
+		assert.Error(t, err)
 		assert.Nil(t, result)
 	})
 }

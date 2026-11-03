@@ -31,7 +31,7 @@ dhcli download model -p my-project -n my-model-amd64 -d ./my-model   # model.so 
 docker run --rm -p 8080:8080 -p 9000:9000 \
   -v "$PWD/my-model:/shared/model" \
   -e TVM_MODEL_NAME=my-model \
-  ghcr.io/scc-digitalhub/tvm-runtime-go:0.26.0
+  ghcr.io/scc-digitalhub/tvm-runtime-go:0.26.0-r2
 
 curl http://localhost:8080/v2/models/my-model
 ```
@@ -46,6 +46,13 @@ curl http://localhost:8080/v2/models/my-model
 | `TVM_NUM_THREADS`     | every core      | TVM threads of each worker. Keep `workers × threads` within the CPUs of the pod. |
 | `TVM_SERVE_PORT`      | `8080`          | REST port.                                                                       |
 | `TVM_SERVE_GRPC_PORT` | `9000`          | gRPC port.                                                                       |
+
+Size workers, CPU and memory for the expected concurrency. With the **unreleased
+source fixes**, a request waiting for a free Nuclio worker returns HTTP `503` /
+gRPC `RESOURCE_EXHAUSTED` when worker allocation times out. The published
+`0.26.0-r2` image can return HTTP `500` for this condition. This capacity error is
+separate from invalid input. Native TVM execution failures retain their existing
+HTTP `500` / gRPC `UNKNOWN` behavior.
 
 ## Endpoints
 
@@ -74,7 +81,7 @@ must be preprocessed by the client; the server consumes tensors. The versioned
 inference route serves the same loaded model, not a model-version repository.
 
 - **Inputs** are matched by name when every input has one and the names match the model,
-  otherwise by position. A missing `datatype` means `FP32`.
+  otherwise by position. A missing REST `datatype` means `FP32`.
 - **Data types**: `FP32`, `FP64`, `INT8`, `INT16`, `INT32`, `INT64`, `UINT8`, `UINT16`,
   `UINT32`, `UINT64`.
   Integer JSON values retain full `INT64`/`UINT64` precision through REST and gRPC.
@@ -83,6 +90,26 @@ inference route serves the same loaded model, not a model-version repository.
   `zero_point` and `quantized_dimension` under `parameters`, so the client can convert the
   values (`real = (q - zero_point) * scale`).
 - **gRPC clients** use the proto `pkg/proto/inference/v2/grpc_service.proto`.
+
+### Input validation (source changes, not yet released)
+
+The source validates the model's datatype, rank and static dimensions before
+calling TVM. Negative metadata dimensions are dynamic; request dimensions must
+be nonnegative. Input names still use the positional fallback described above.
+Invalid input returns HTTP `400` / gRPC `INVALID_ARGUMENT`, including wrong
+element counts, unsupported datatypes, nonfinite values and numeric overflow. Integer values must
+be integral and within the declared datatype's range; `1.0` and `1e1` are accepted
+without truncating fractional values or wrapping overflow.
+
+gRPC accepts either typed `contents` or little-endian `raw_input_contents`,
+never both. Typed contents must use the field matching the declared datatype.
+Raw encoding requires exactly one buffer per input; malformed buffers are
+rejected. Unknown or empty model names return `NOT_FOUND`, including
+metadata requests.
+
+These validation fixes require a new runtime build. The published `0.26.0-r2`
+image in the examples does not include them. No model recompilation is needed
+when the TVM version and revision remain unchanged.
 
 ## Which models it serves
 
@@ -118,7 +145,7 @@ the **Run**, while the Task supplies common Kubernetes settings. For example:
 kind: tvm+serve:run
 spec:
   task: tvm+serve://my-project/<task-id>
-  image: ghcr.io/scc-digitalhub/tvm-runtime-go:0.26.0
+  image: ghcr.io/scc-digitalhub/tvm-runtime-go:0.26.0-r2
   served_name: my-model
   workers: 1
   resources: {cpu: "4", mem: 2Gi}

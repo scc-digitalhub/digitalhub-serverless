@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/big"
 	"strconv"
+	"strings"
 )
 
 // DLPack type codes (dlpack.h DLDataTypeCode).
@@ -116,15 +118,54 @@ func collectNumbers(v any) ([]json.Number, error) {
 	return out, nil
 }
 
-func numUint64(n json.Number) (uint64, error) {
-	if u, err := strconv.ParseUint(n.String(), 10, 64); err == nil {
-		return u, nil
-	}
+func integerNumber(n json.Number) (*big.Int, error) {
 	f, err := n.Float64()
+	if err != nil || math.IsInf(f, 0) || math.IsNaN(f) || math.Trunc(f) != f || f < -0x1p63 || f > 0x1p64 {
+		return nil, fmt.Errorf("value %s must be a finite integer", n)
+	}
+	if f == 0 {
+		mantissa := n.String()
+		if i := strings.IndexAny(mantissa, "eE"); i >= 0 {
+			mantissa = mantissa[:i]
+		}
+		if strings.Trim(mantissa, "-.0") != "" {
+			return nil, fmt.Errorf("value %s must be an integer", n)
+		}
+		return big.NewInt(0), nil
+	}
+	value, ok := new(big.Rat).SetString(n.String())
+	if !ok || !value.IsInt() {
+		return nil, fmt.Errorf("value %s must be an integer", n)
+	}
+	return value.Num(), nil
+}
+
+func numInt64(n json.Number) (int64, error) {
+	if value, err := n.Int64(); err == nil {
+		return value, nil
+	}
+	value, err := integerNumber(n)
 	if err != nil {
 		return 0, err
 	}
-	return uint64(f), nil
+	if !value.IsInt64() {
+		return 0, fmt.Errorf("value %s is out of range for INT64", n)
+	}
+	return value.Int64(), nil
+}
+
+func numUint64(n json.Number) (uint64, error) {
+	if value, err := strconv.ParseUint(n.String(), 10, 64); err == nil {
+		return value, nil
+	}
+	value, err := integerNumber(n)
+	if err != nil {
+		return 0, err
+	}
+	if !value.IsUint64() {
+		return 0, fmt.Errorf("value %s is out of range for UINT64", n)
+	}
+	return value.Uint64(), nil
 }
 
 // encodeInputBytes packs numbers into raw little-endian bytes for the v2 datatype.
@@ -146,21 +187,33 @@ func encodeInputBytes(nums []json.Number, datatype string) ([]byte, error) {
 			if err != nil {
 				return nil, err
 			}
+			if math.IsInf(f, 0) || math.IsNaN(f) {
+				return nil, fmt.Errorf("value %s must be finite", n)
+			}
 			if info.bits == 32 {
+				if math.IsInf(float64(float32(f)), 0) {
+					return nil, fmt.Errorf("value %s is out of range for %s", n, datatype)
+				}
 				u = uint64(math.Float32bits(float32(f)))
 			} else {
 				u = math.Float64bits(f)
 			}
 		case dlInt:
-			v, err := n.Int64()
+			v, err := numInt64(n)
 			if err != nil {
 				return nil, err
+			}
+			if info.bits < 64 && (v < -(int64(1)<<(info.bits-1)) || v >= int64(1)<<(info.bits-1)) {
+				return nil, fmt.Errorf("value %s is out of range for %s", n, datatype)
 			}
 			u = uint64(v)
 		default: // dlUInt
 			v, err := numUint64(n)
 			if err != nil {
 				return nil, err
+			}
+			if info.bits < 64 && v >= uint64(1)<<info.bits {
+				return nil, fmt.Errorf("value %s is out of range for %s", n, datatype)
 			}
 			u = v
 		}

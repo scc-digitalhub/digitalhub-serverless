@@ -164,12 +164,12 @@ func (r *tvmRuntime) ProcessEvent(event nuclio.Event,
 	dec.UseNumber()
 	var req openinference.RESTInferenceRequest
 	if err := dec.Decode(&req); err != nil {
-		return nil, errors.Wrap(err, "invalid inference request")
+		return nil, &openinference.InvalidInputError{Err: errors.Wrap(err, "invalid inference request")}
 	}
 
 	inputs, err := r.buildInputs(req.Inputs)
 	if err != nil {
-		return nil, err
+		return nil, &openinference.InvalidInputError{Err: err}
 	}
 	req.Inputs = nil
 
@@ -197,7 +197,7 @@ func (r *tvmRuntime) ProcessEvent(event nuclio.Event,
 
 func (r *tvmRuntime) buildInputs(in []openinference.RESTInferInputTensor) ([]tvmrelax.Tensor, error) {
 	// enforce arity up front (else the entry call fails later with an obscure FFI error).
-	if len(r.metadata.Inputs) > 0 && len(in) != len(r.metadata.Inputs) {
+	if r.metadata.Inputs != nil && len(in) != len(r.metadata.Inputs) {
 		return nil, errors.Errorf("expected %d input tensor(s), got %d", len(r.metadata.Inputs), len(in))
 	}
 	in = orderInputs(in, r.metadata.Inputs)
@@ -207,6 +207,26 @@ func (r *tvmRuntime) buildInputs(in []openinference.RESTInferInputTensor) ([]tvm
 		datatype := t.Datatype
 		if datatype == "" {
 			datatype = "FP32" // default when a client omits it
+		}
+		if i < len(r.metadata.Inputs) {
+			spec := r.metadata.Inputs[i]
+			expected := spec.Dtype
+			if expected == "" {
+				expected = "float32"
+			}
+			if datatype != tvmToV2Name[expected] {
+				return nil, errors.Errorf("input %q: expected datatype %s, got %s", spec.Name, tvmToV2Name[expected], datatype)
+			}
+			if spec.Shape != nil {
+				if len(t.Shape) != len(spec.Shape) {
+					return nil, errors.Errorf("input %q: expected shape %v, got %v", spec.Name, spec.Shape, t.Shape)
+				}
+				for dimension, size := range spec.Shape {
+					if size >= 0 && size != t.Shape[dimension] {
+						return nil, errors.Errorf("input %q: expected shape %v, got %v", spec.Name, spec.Shape, t.Shape)
+					}
+				}
+			}
 		}
 		code, bits, err := v2ToDLPack(datatype)
 		if err != nil {

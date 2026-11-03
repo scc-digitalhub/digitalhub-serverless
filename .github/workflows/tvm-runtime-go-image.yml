@@ -181,6 +181,20 @@ jobs:
             echo "TVM_FFI_GIT_COMMIT=$(git -C "$src/3rdparty/tvm-ffi" rev-parse HEAD)"
           } >> "$GITHUB_ENV"
 
+      - uses: actions/setup-go@v5
+        if: matrix.cross == ''
+        with:
+          go-version-file: go.mod
+
+      - name: Test native TVM runtime and inference transports
+        if: matrix.cross == ''
+        run: |
+          export CGO_ENABLED=1 GOFLAGS=-mod=readonly
+          export CGO_CFLAGS="-I$TVM_SRC/3rdparty/tvm-ffi/include -I$TVM_SRC/3rdparty/tvm-ffi/3rdparty/dlpack/include"
+          export CGO_LDFLAGS="-L$TVM_BUILD/lib"
+          export LD_LIBRARY_PATH="$TVM_BUILD/lib"
+          go test ./pkg/processor/runtime/tvm/... ./pkg/processor/trigger/openinference -count=1
+
       - name: Stage the image build context
         run: |
           ctx="$RUNNER_TEMP/ctx"
