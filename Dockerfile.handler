@@ -99,7 +99,17 @@ COPY --from=python-wheels /requirements/nuclio.txt /opt/nuclio/requirements/nucl
 COPY --from=python-wheels /requirements/common.txt /opt/nuclio/requirements/common.txt
 COPY --from=uv /uv /uvx /opt/nuclio/uv/
 # install build essentials to be able to install some dependencies from source, if needed
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    curl \
+    git \
+    libexpat1 \
+    libgomp1 \
+    libpq5 \
+    libgl1 \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
 #install both nuclio and our dependencies leveraging the pre-downloaded wheels
 RUN python /opt/nuclio/whl/$(basename /opt/nuclio/whl/pip-*.whl)/pip install pip --no-index --find-links /opt/nuclio/whl \
   && python -m pip install --no-index --find-links /opt/nuclio/whl -r /opt/nuclio/requirements/nuclio.txt
@@ -116,6 +126,6 @@ USER ${USER}
 WORKDIR ${HOME}
 ENV PATH="${HOME}/.local/bin:$PATH"
 ENV PYTHONPATH="${HOME}/.local/lib/python${PYTHON_VERSION}/site-packages"
-HEALTHCHECK --interval=1s --timeout=3s CMD /usr/local/bin/uhttpc --url http://127.0.0.1:8082/ready || exit 1
+HEALTHCHECK --interval=5s --timeout=10s CMD /usr/local/bin/uhttpc --url http://127.0.0.1:8082/ready || exit 1
 # COPY . /opt/nuclio
 CMD [ "/opt/nuclio/processor" ]
