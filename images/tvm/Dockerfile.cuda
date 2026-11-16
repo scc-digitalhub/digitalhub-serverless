@@ -1,0 +1,81 @@
+# SPDX-FileCopyrightText: © 2026 DSLab - Fondazione Bruno Kessler
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Optional CUDA processor. Keep the CPU Dockerfile and image tags independent.
+ARG TVM_VERSION=unknown
+ARG TVM_GIT_COMMIT=unknown
+ARG TVM_FFI_VERSION=unknown
+ARG TVM_FFI_GIT_COMMIT=unknown
+ARG CUDA_RUNTIME_IMAGE=nvidia/cuda:13.2.1-base-ubuntu24.04@sha256:7be56e69d8ae7c3648b8fca009fa35980ecd9c6eefaafbff3ee8c224e0043eb5
+FROM golang:1.25 AS build
+ARG TVM_VERSION
+ARG TVM_GIT_COMMIT
+ARG GO_BUILD_JOBS=2
+ARG GO_MEMORY_LIMIT=1024MiB
+COPY tvm-include /opt/tvm/include
+COPY tvm-lib /opt/tvm/lib
+COPY cuda-lib /opt/tvm/cuda-lib
+COPY cuda-driver-stubs /opt/tvm/cuda-driver-stubs
+WORKDIR /src
+COPY src/ .
+# The driver stub is needed only to link on a builder without a GPU. It is never
+# placed in the default loader path or copied into the runtime image.
+ENV CGO_ENABLED=1 \
+    GOMAXPROCS=${GO_BUILD_JOBS} \
+    GOMEMLIMIT=${GO_MEMORY_LIMIT} \
+    CGO_CFLAGS="-I/opt/tvm/include/tvm-ffi -I/opt/tvm/include/dlpack" \
+    CGO_LDFLAGS="-L/opt/tvm/lib -Wl,-rpath,/opt/tvm/lib -Wl,-rpath-link,/opt/tvm/cuda-driver-stubs -Wl,-rpath-link,/opt/tvm/cuda-lib"
+RUN go build -p "${GO_BUILD_JOBS}" -tags cuda \
+    -ldflags="-X github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/runtime/tvm.runtimeTVMVersion=${TVM_VERSION} -X github.com/scc-digitalhub/digitalhub-serverless/pkg/processor/runtime/tvm.runtimeTVMGitCommit=${TVM_GIT_COMMIT}" \
+    -o /out/processor ./cmd/processor/main.go
+# Exercise the backend registry and no-GPU startup failure on hosted builders.
+# The stub enters the loader path only for this test process, in the build stage.
+RUN TVM_TEST_CUDA_UNAVAILABLE=1 \
+    LD_LIBRARY_PATH=/opt/tvm/lib:/opt/tvm/cuda-lib:/opt/tvm/cuda-driver-stubs \
+    go test -p "${GO_BUILD_JOBS}" -tags cuda ./pkg/processor/runtime/tvm/... ./pkg/processor/trigger/openinference
+
+FROM ${CUDA_RUNTIME_IMAGE}
+ARG TVM_VERSION
+ARG TVM_GIT_COMMIT
+ARG TVM_FFI_VERSION
+ARG TVM_FFI_GIT_COMMIT
+LABEL org.opencontainers.image.version="${TVM_VERSION}" \
+    org.opencontainers.image.source="https://github.com/apache/tvm" \
+    org.opencontainers.image.revision="${TVM_GIT_COMMIT}" \
+    org.digitalhub.tvm-ffi.version="${TVM_FFI_VERSION}" \
+    org.digitalhub.tvm-ffi.revision="${TVM_FFI_GIT_COMMIT}" \
+    org.digitalhub.tvm.backends="cpu,cuda" \
+    org.digitalhub.cuda.version="13.2.1"
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libstdc++6 ca-certificates jq \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /opt/tvm/lib/libtvm_runtime.so /opt/tvm/lib/libtvm_ffi.so /opt/tvm/lib/libtvm_runtime_cuda.so /opt/tvm/lib/
+COPY provenance.json /opt/tvm/provenance.json
+COPY cuda-CMakeCache.txt /opt/tvm/cuda-CMakeCache.txt
+COPY --from=build /out/processor /opt/nuclio/processor
+COPY entrypoint.sh /entrypoint.sh
+COPY entrypoint.cuda.sh /entrypoint.cuda.sh
+RUN chmod +x /entrypoint.sh /entrypoint.cuda.sh
+# The real driver is injected by NVIDIA Container Toolkit at launch. During a
+# GPU-less image build, libcuda.so.1 is the only permitted unresolved dependency.
+RUN LD_LIBRARY_PATH=/opt/tvm/lib LD_TRACE_LOADED_OBJECTS=1 /opt/nuclio/processor > /tmp/libraries \
+    && grep -F '/opt/tvm/lib/libtvm_ffi.so' /tmp/libraries \
+    && grep -F '/opt/tvm/lib/libtvm_runtime.so' /tmp/libraries \
+    && grep -F '/opt/tvm/lib/libtvm_runtime_cuda.so' /tmp/libraries \
+    && grep -F 'libcudart.so.13' /tmp/libraries \
+    && ! grep -F 'not found' /tmp/libraries | grep -vE '^[[:space:]]*libcuda\.so\.1 => not found$' \
+    && ! find /opt/tvm /usr/local/cuda -path '*/stubs/libcuda.so*' -print | grep . \
+    && rm /tmp/libraries
+ENV LD_LIBRARY_PATH=/opt/tvm/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64 \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+    TVM_VERSION=${TVM_VERSION} \
+    TVM_GIT_COMMIT=${TVM_GIT_COMMIT} \
+    TVM_FFI_VERSION=${TVM_FFI_VERSION} \
+    TVM_FFI_GIT_COMMIT=${TVM_FFI_GIT_COMMIT} \
+    TVM_MODEL_DIR=/shared/model \
+    TVM_MODEL_NAME=model \
+    TVM_SERVE_PORT=8080 \
+    TVM_SERVE_GRPC_PORT=9000
+EXPOSE 8080 9000
+ENTRYPOINT ["/entrypoint.cuda.sh"]

@@ -20,6 +20,8 @@ Runtime Rust** implements the same inference protocol and can be used instead.
 Each worker loads its own `model.so` and `metadata.json`, then executes one
 inference at a time. Workers provide parallel requests; `TVM_NUM_THREADS` controls
 threads within each inference. No model-specific image is needed.
+CPU remains the default, including ARM32, with no NVIDIA dependencies. Optional
+[CUDA FP32 builds](#optional-cuda-fp32) use separate AMD64/ARM64 runtime images.
 
 ## Quick start
 
@@ -117,7 +119,8 @@ At startup the runtime refuses the model, with a clear error, unless:
 
 - `metadata.json` has the same `tvm_version` and `tvm_git_commit` as the TVM built into the
   image: **compile with a DigitalHub TVM Toolkit containing the same TVM version and commit**;
-- the model was compiled for a Linux GNU/glibc CPU (LLVM target) of the image architecture;
+- the model's Linux GNU/glibc host matches the image architecture: an LLVM CPU
+  target, or a CUDA target with an explicit nested LLVM host in a CUDA-enabled build;
 - `target_triple`, when present, agrees with the runtime, and the actual ELF library
   has the matching machine, 32/64-bit class and byte order;
 - every input and output uses a supported data type.
@@ -134,7 +137,62 @@ the hard-float ABI.
 
 Architecture checks do not verify every instruction selected by `mcpu`/`mattr`;
 choose a compatible CPU. Adding a compile profile does not create a runtime image
-for another platform or enable CUDA/GPU inference.
+for another platform. CUDA requires the separate build described below.
+
+## Optional CUDA FP32
+
+The CUDA build loads the standard CUDA TVM runtime alongside the CPU host runtime.
+Artifact metadata selects the backend; no new serving environment or device field
+is needed. CUDA targets require an explicit GPU architecture and nested LLVM host,
+for example the Jetson Orin target:
+
+```json
+{"kind":"cuda","arch":"sm_87","host":{"kind":"llvm","mtriple":"aarch64-linux-gnu"}}
+```
+
+The host triple, actual ELF architecture and TVM version/commit checks still apply.
+A CPU build rejects CUDA artifacts. A CUDA build uses visible CUDA device 0 plus
+the CPU VM host and fails if its backend, driver or device is unavailable; it does
+not fall back to CPU. CUDA tensors are copied and GPU work is synchronized before
+the response is returned. Requests and supported protocol datatypes are unchanged;
+the initial GPU validation scope is FP32. FP16/BFLOAT16 protocol inputs and outputs remain unsupported;
+internal mixed precision kernels and accuracy require separate hardware qualification.
+
+Build from the repository root with a matching, attested CUDA TVM build:
+
+```bash
+TVM_BACKEND=cuda TVM_HOME=/path/to/tvm-0.26.0 TVM_BUILD=/path/to/cuda-build \
+  TAG=local/tvm-runtime-go:0.26-cuda13.2.1 images/tvm/build.sh
+```
+
+The build uses `images/tvm/Dockerfile.cuda` and the Go `cuda` build tag. Provenance
+must attest CPU/CUDA backends and matching hashes for `libtvm_runtime.so`,
+`libtvm_ffi.so` and `libtvm_runtime_cuda.so`. The final image has no Python, `nvcc`
+or driver stubs. CUDA images support Linux AMD64/ARM64; CPU builds retain ARMv7.
+The `local/...` tag is a development example, not a published GHCR CUDA release.
+The builder needs `CUDA_HOME=/usr/local/cuda` by default, or explicit
+`CUDA_CUDART_LIBRARY` and `CUDA_DRIVER_STUB_LIBRARY` paths to CUDA 13.2.1's
+`libcudart.so.13` and build-only `libcuda.so` stub. Those files support linking and
+tests in the builder; the driver stub is excluded from the final runtime image.
+
+On a configured AMD64 NVIDIA host, start a CUDA artifact with real device access:
+
+```bash
+docker run --rm --gpus all -p 8080:8080 -p 9000:9000 \
+  -v "$PWD/my-cuda-model:/shared/model" -e TVM_MODEL_NAME=my-model \
+  local/tvm-runtime-go:0.26-cuda13.2.1
+```
+
+For Jetson, use the ARM64 image and GPU container configuration compatible with its
+installed JetPack stack. Start with one worker; every worker has a separate model
+copy and GPU memory allocation. CORE uses the existing `image`, GPU `profile`,
+`resources.gpu` and `envs` settings. It serves explicit `model_path`, otherwise
+Function `so_model`; selecting a profile does not choose or recompile a Model.
+
+The intended Jetson baseline is JetPack 7.2 / L4T 39.2 / CUDA 13.2.1 / Ubuntu 24.04.
+Actual Jetson and AMD64 NVIDIA execution, accuracy, tuning and performance remain
+**NOT_RUN**. Offline compilation and unavailable-device tests are not GPU inference
+validation. See the [CUDA guide](https://scc-digitalhub.github.io/docs/0.16/runtimes/tvm/#cuda-fp32-optional).
 
 ## Use from DigitalHub CORE
 
@@ -226,6 +284,11 @@ versions and commits, library hashes and workflow run. The image label
 `org.digitalhub.source.revision` identifies the Go source commit; the existing TVM
 revision label continues to identify Apache TVM.
 
+CUDA has a separate manual workflow, `tvm-runtime-go-cuda-image.yml`, covering
+AMD64/ARM64 and a distinct CUDA image package/tag. It accepts publication from
+`main` only. These development instructions publish no CUDA release and retain
+the existing CPU tags.
+
 ## Development
 
 Tests and builds need the headers and libraries of a local build of the same Apache TVM
@@ -244,9 +307,24 @@ A processor built without the TVM version and commit refuses every model; the im
 them with
 `-ldflags "-X .../runtime/tvm.runtimeTVMVersion=<version> -X .../runtime/tvm.runtimeTVMGitCommit=<commit>"`.
 
+Manual CUDA builds and tests add `-tags cuda` and use matching CUDA-enabled TVM
+libraries. On real NVIDIA hardware, `TVM_TEST_MODEL` can select a compiled FP32
+`[4]` fixture returning `x + 1`, and `TVM_TEST_BACKEND=cuda` selects its CUDA backend:
+
+```bash
+TVM_TEST_MODEL=/path/to/cuda-model.so TVM_TEST_BACKEND=cuda \
+  go test -tags cuda ./pkg/processor/runtime/tvm/tvmrelax -run TestFP32Model -v
+```
+
+The test checks repeated outputs and handle lifetimes. Run the corresponding LLVM
+fixture with `TVM_TEST_BACKEND=llvm` for CPU comparison. Missing fixtures are skipped,
+not GPU passes. `TVM_TEST_CUDA_UNAVAILABLE=1` enables the missing-device check in a
+CUDA build; an isolated driver stub may support that test process only. Never use
+stubs for real inference or copy them into the runtime image.
+
 ## Limitations
 
-- CPU only, no GPU.
+- CPU is the default; optional CUDA FP32 requires a separate build and real NVIDIA device access.
 - One model per processor; no automatic request batching.
 - At most 64 output tensors per inference; larger results are rejected, never truncated.
 - `FP16` tensors are not supported yet.
@@ -283,3 +361,13 @@ Copyright © 2025 DSLab – Fondazione Bruno Kessler and individual contributors
 
 This project is licensed under the Apache License, Version 2.0.
 You may not use this file except in compliance with the License. Ownership of contributions remains with the original authors and is governed by the terms of the Apache 2.0 License, including the requirement to grant a license to the project.
+
+For Orin with the current ARM64 base, the host needs NVIDIA Container Toolkit
+1.19.1 or newer (`nvidia-ctk --version`); 1.19.0 fails before the entrypoint in the
+CUDA compatibility hook. See the [CUDA deployment guide](https://scc-digitalhub.github.io/docs/0.16/runtimes/tvm/#cuda-fp32-optional).
+
+Local image builds retain an isolated context; `TVM_BUILD_CONTEXT` selects a new
+directory. CPU publication rejects CUDA tags, CUDA tags require a `cuda13.2.1`
+component, and publication checks both architecture tags and the final manifest.
+Existing registry tags and failed lookups stop publication. Rebuilt releases need
+new tags. These guards do not publish any image by themselves.

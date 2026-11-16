@@ -72,6 +72,10 @@ jobs:
             echo "::error::image_tag must be a Docker tag of at most 122 characters"
             exit 1
           fi
+          if [[ "${tag,,}" == *cuda* ]]; then
+            echo "::error::CPU publication cannot use a CUDA image tag"
+            exit 1
+          fi
           # apache-tvm-ffi release bundled with each TVM version (keep in step with the TVM toolkit image)
           case "$tvm" in
             0.24.*) ffi=0.1.11 ;;
@@ -273,6 +277,7 @@ jobs:
         env:
           ARCH: ${{ matrix.arch }}
         run: |
+          python3 images/tvm/check-image-tag.py "$REF"
           docker push "$REF"
           docker image inspect --format '{{json .RepoDigests}}' "$REF" > repo-digests.json
           python3 - <<'PY'
@@ -305,6 +310,9 @@ jobs:
       TVM_VERSION: ${{ needs.version.outputs.tvm }}
       TVM_FFI_VERSION: ${{ needs.version.outputs.ffi }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - name: Log in to ghcr.io
         uses: docker/login-action@v3
         with:
@@ -322,6 +330,7 @@ jobs:
 
       - name: Publish the multi-arch tag
         run: |
+          python3 images/tvm/check-image-tag.py "$IMAGE:$TAG"
           python3 - <<'PY'
           import json
           import os
