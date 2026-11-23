@@ -186,7 +186,7 @@ docker run --rm --gpus all -p 8080:8080 -p 9000:9000 \
 For Jetson, use the ARM64 image and GPU container configuration compatible with its
 installed JetPack stack. Start with one worker; every worker has a separate model
 copy and GPU memory allocation. CORE uses the existing `image`, GPU `profile`,
-`resources.gpu` and `envs` settings. Set `model_path` to the versioned Model key
+`resources.gpu` and `envs` settings. Set `so_model_path` to the versioned Model key
 returned by the selected Compile Run. Selecting a profile does not choose or
 recompile a Model.
 
@@ -204,7 +204,7 @@ Task supplies common Kubernetes settings.
 
 The Function keeps the reference to the IR produced by build. Each Compile Run
 records its own compiled Model key in `status.outputs.compiled_so`. The serve Run
-requires that versioned key in `model_path`; CORE does not take it from the
+requires that versioned key in `so_model_path`; CORE does not take it from the
 Function. Another compile does not change the Model selected by an existing
 serve Run. For example:
 
@@ -212,7 +212,7 @@ serve Run. For example:
 kind: tvm+serve:run
 spec:
   task: tvm+serve://my-project/<task-id>
-  model_path: store://my-project/model/tvm-so/my-model-amd64:<compiled-model-id>
+  so_model_path: store://my-project/model/tvm-so/my-model-amd64:<compiled-model-id>
   image: ghcr.io/scc-digitalhub/tvm-runtime-go:0.26.0-r3
   served_name: my-model
   workers: 1
@@ -221,7 +221,7 @@ spec:
 
 | Run option | Default | Effect |
 | --- | --- | --- |
-| `model_path` | required | Versioned `tvm-so` Model key from the selected Compile Run's `status.outputs.compiled_so`. |
+| `so_model_path` | required | Versioned `tvm-so` Model key from the selected Compile Run's `status.outputs.compiled_so`. |
 | `served_name` | Function name | Model name in `/v2/models/<name>` and `TVM_MODEL_NAME`. |
 | `image` | `RUNTIME_TVM_SERVE` | Runtime image for this Run. |
 | `replicas` | `1` | Number of pods. |
