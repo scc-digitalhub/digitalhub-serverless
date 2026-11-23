@@ -10,6 +10,7 @@ import (
 	"debug/elf"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"runtime"
 	"strings"
 )
@@ -19,10 +20,14 @@ var (
 	runtimeTVMGitCommit = "unknown"
 )
 
-type llvmTarget struct {
-	Kind    string `json:"kind"`
-	MTriple string `json:"mtriple"`
+type modelTarget struct {
+	Kind    string       `json:"kind"`
+	MTriple string       `json:"mtriple"`
+	Arch    string       `json:"arch"`
+	Host    *modelTarget `json:"host"`
 }
+
+var cudaArchitecture = regexp.MustCompile(`^sm_[0-9]+[a-z]?$`)
 
 func validateModelCompatibility(metadata modelMetadata, modelPath string) error {
 	if runtimeTVMVersion == "" || runtimeTVMVersion == "unknown" {
@@ -51,7 +56,7 @@ func validateModelCompatibility(metadata modelMetadata, modelPath string) error 
 			runtimeTVMGitCommit,
 		)
 	}
-	if err := validateLLVMTarget(metadata.Target, runtime.GOARCH); err != nil {
+	if _, err := validateModelTarget(metadata.Target, runtime.GOARCH); err != nil {
 		return err
 	}
 	if err := validateTargetTriple(metadata.TargetTriple, runtime.GOARCH); err != nil {
@@ -61,14 +66,25 @@ func validateModelCompatibility(metadata modelMetadata, modelPath string) error 
 }
 
 func validateLLVMTarget(targetText, runtimeArch string) error {
+	target, err := parseModelTarget(targetText)
+	if err != nil {
+		return err
+	}
+	if target.Kind != "llvm" {
+		return fmt.Errorf("expected an LLVM CPU target, got target kind %q", target.Kind)
+	}
+	return validateTargetTriple(target.MTriple, runtimeArch)
+}
+
+func parseModelTarget(targetText string) (modelTarget, error) {
 	targetText = strings.TrimSpace(targetText)
 	if targetText == "" {
-		return fmt.Errorf("model metadata has no target")
+		return modelTarget{}, fmt.Errorf("model metadata has no target")
 	}
-	target := llvmTarget{}
+	target := modelTarget{}
 	if strings.HasPrefix(targetText, "{") {
 		if err := json.Unmarshal([]byte(targetText), &target); err != nil {
-			return fmt.Errorf("invalid TVM target %q: %w", targetText, err)
+			return modelTarget{}, fmt.Errorf("invalid TVM target %q: %w", targetText, err)
 		}
 	} else {
 		fields := strings.Fields(targetText)
@@ -77,12 +93,41 @@ func validateLLVMTarget(targetText, runtimeArch string) error {
 			if value, found := strings.CutPrefix(field, "-mtriple="); found {
 				target.MTriple = value
 			}
+			if value, found := strings.CutPrefix(field, "-arch="); found {
+				target.Arch = value
+			}
 		}
 	}
-	if target.Kind != "llvm" {
-		return fmt.Errorf("serve image supports LLVM CPU models, got target kind %q", target.Kind)
+	return target, nil
+}
+
+// CUDA describes the device code. Only its nested LLVM host and the ELF library
+// describe the architecture of the processor that loads model.so.
+func validateModelTarget(targetText, runtimeArch string) (string, error) {
+	target, err := parseModelTarget(targetText)
+	if err != nil {
+		return "", err
 	}
-	return validateTargetTriple(target.MTriple, runtimeArch)
+	switch target.Kind {
+	case "llvm":
+		return "llvm", validateTargetTriple(target.MTriple, runtimeArch)
+	case "cuda":
+		if runtimeArch != "amd64" && runtimeArch != "arm64" {
+			return "", fmt.Errorf("CUDA serve images support amd64 and arm64 hosts, got %q", runtimeArch)
+		}
+		if !cudaArchitecture.MatchString(target.Arch) {
+			return "", fmt.Errorf("CUDA model requires an explicit GPU architecture such as sm_87, got %q", target.Arch)
+		}
+		if target.Host == nil || target.Host.Kind != "llvm" || target.Host.MTriple == "" {
+			return "", fmt.Errorf("CUDA model requires a nested LLVM host target with an explicit mtriple")
+		}
+		if err := validateTargetTriple(target.Host.MTriple, runtimeArch); err != nil {
+			return "", fmt.Errorf("CUDA host target: %w", err)
+		}
+		return "cuda", nil
+	default:
+		return "", fmt.Errorf("serve image supports LLVM CPU or CUDA models, got target kind %q", target.Kind)
+	}
 }
 
 func validateTargetTriple(triple, runtimeArch string) error {

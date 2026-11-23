@@ -45,6 +45,7 @@ type inferResult struct {
 type tvmRuntime struct {
 	*runtime.AbstractRuntime // supplies every Runtime method except ProcessEvent/ProcessBatch
 	metadata                 modelMetadata
+	backend                  string
 	jobCh                    chan inferJob // ProcessEvent -> modelLoop
 }
 
@@ -96,6 +97,7 @@ func NewRuntime(parentLogger logger.Logger,
 	if err := validateModelCompatibility(r.metadata, modelPath); err != nil {
 		return nil, errors.Wrap(err, "Incompatible TVM model")
 	}
+	r.backend, _ = validateModelTarget(r.metadata.Target, goruntime.GOARCH)
 
 	// load + run on ONE dedicated OS thread (VM/ffi handles are not thread-safe).
 	ready := make(chan error, 1)
@@ -108,6 +110,7 @@ func NewRuntime(parentLogger logger.Logger,
 	// core. CORE splits the pod CPUs among the workers.
 	parentLogger.InfoWith("TVM runtime ready",
 		"modelDir", modelDir, "entry", r.metadata.Entry,
+		"backend", r.backend, "deviceID", 0,
 		"inputs", len(r.metadata.Inputs), "outputs", len(r.metadata.Outputs),
 		"tvmNumThreads", os.Getenv("TVM_NUM_THREADS"))
 	r.SetStatus(status.Ready)
@@ -144,11 +147,12 @@ func (r *tvmRuntime) modelLoop(modelDir string, ready chan error) {
 	goruntime.LockOSThread()
 	defer goruntime.UnlockOSThread()
 
-	model, err := tvmrelax.Load(filepath.Join(modelDir, "model.so"), r.metadata.Entry)
+	model, err := tvmrelax.LoadWithBackend(filepath.Join(modelDir, "model.so"), r.metadata.Entry, r.backend)
 	ready <- err
 	if err != nil {
 		return
 	}
+	defer model.Close()
 	for job := range r.jobCh {
 		outs, inferErr := model.Infer(job.inputs)
 		job.respCh <- inferResult{outputs: outs, err: inferErr}

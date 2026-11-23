@@ -36,6 +36,39 @@ func TestValidateLLVMTarget(t *testing.T) {
 	assert.Empty(t, architectureFromTriple("arm64_be-linux-gnu"))
 }
 
+func TestValidateModelTargetCUDA(t *testing.T) {
+	for _, tc := range []struct{ arch, triple, gpu string }{
+		{"amd64", "x86_64-pc-linux-gnu", "sm_90a"},
+		{"arm64", "aarch64-linux-gnu", "sm_87"},
+		{"arm64", "aarch64-linux-gnu", "sm_110"},
+	} {
+		target := `{"kind":"cuda","arch":"` + tc.gpu + `","host":{"kind":"llvm","mtriple":"` + tc.triple + `"}}`
+		backend, err := validateModelTarget(target, tc.arch)
+		require.NoError(t, err)
+		assert.Equal(t, "cuda", backend)
+	}
+	for _, target := range []string{
+		`cuda -arch=sm_87`,
+		`{"kind":"cuda","host":{"kind":"llvm","mtriple":"x86_64-linux-gnu"}}`,
+		`{"kind":"cuda","arch":"compute_87","host":{"kind":"llvm","mtriple":"x86_64-linux-gnu"}}`,
+		`{"kind":"cuda","arch":"sm_87","host":{"kind":"llvm"}}`,
+		`{"kind":"cuda","arch":"sm_87","host":{"kind":"cuda"}}`,
+		`{"kind":"cuda","arch":"sm_87","host":{"kind":"llvm","mtriple":"aarch64-linux-gnu"}}`,
+		`{"kind":"cuda","arch":"sm_87","host":{"kind":"llvm","mtriple":"x86_64-linux-musl"}}`,
+		`{"kind":"vulkan"}`,
+	} {
+		_, err := validateModelTarget(target, "amd64")
+		assert.Error(t, err, target)
+	}
+	_, err := validateModelTarget(`{"kind":"cuda","arch":"sm_87","host":{"kind":"llvm","mtriple":"armv7l-linux-gnueabihf"}}`, "arm")
+	assert.ErrorContains(t, err, "amd64 and arm64")
+	for _, target := range []string{"llvm", "llvm -mtriple=armv7l-linux-gnueabihf"} {
+		backend, err := validateModelTarget(target, "arm")
+		assert.NoError(t, err)
+		assert.Equal(t, "llvm", backend)
+	}
+}
+
 func TestValidateELFArchitecture(t *testing.T) {
 	executable, err := os.Executable()
 	require.NoError(t, err)

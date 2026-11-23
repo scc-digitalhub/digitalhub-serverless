@@ -1,0 +1,382 @@
+# Separate opt-in CUDA publication. Existing CPU image tags are never touched.
+name: tvm-runtime-go CUDA image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: New CUDA image tag (must include cuda13.2.1)
+        required: true
+        default: "0.26.0-cuda13.2.1-r1"
+        type: string
+      publish:
+        description: Publish the validated CUDA image (main only)
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.image_tag }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/scc-digitalhub/tvm-runtime-go-cuda
+  DESCRIPTION: "Nuclio processor with optional CUDA TVM runtime (OpenInference v2 REST and gRPC)"
+  TVM_VERSION: "0.26.0"
+  TVM_FFI_VERSION: "0.1.13.post2"
+  EXPECTED_TVM_COMMIT: c7b458e946bc4266915da582457476bdcd9705ae
+  EXPECTED_FFI_COMMIT: 12dbf053b3d9ba4ebd9da3123b1aeca79cf74229
+  CUDA_DEVEL_IMAGE: nvidia/cuda:13.2.1-devel-ubuntu24.04@sha256:44a9504c6dfb50b1241464241b02a93871928f373de6f5a644cf5fe9f080aa63
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - name: Validate CUDA publication
+        id: v
+        env:
+          INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          if [ "$PUBLISH" = true ] && [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::publishing must run from main; use publish=false for branch validation"
+            exit 1
+          fi
+          if [[ ! "$INPUT_IMAGE_TAG" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,121}$ || ! "$INPUT_IMAGE_TAG" =~ (^|[-_.])cuda13[.]2[.]1($|[-_]) ]]; then
+            echo "::error::image_tag must be a Docker tag including cuda13.2.1 (at most 122 characters)"
+            exit 1
+          fi
+          echo "tag=$INPUT_IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            platform: linux/amd64
+            elf_machine: Advanced Micro Devices X86-64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            elf_machine: AArch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    env:
+      IMAGE_TAG: ${{ needs.version.outputs.tag }}
+      REF: ghcr.io/scc-digitalhub/tvm-runtime-go-cuda:${{ needs.version.outputs.tag }}-${{ matrix.arch }}
+      PLATFORM: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Log in to ghcr.io
+        if: inputs.publish
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compile the CUDA TVM runtime on the native architecture
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends binutils rsync
+          src="$RUNNER_TEMP/tvm"
+          git clone --depth 1 --branch "v$TVM_VERSION" https://github.com/apache/tvm "$src"
+          git -C "$src" submodule update --init --depth 1 3rdparty/tvm-ffi
+          git -C "$src/3rdparty/tvm-ffi" submodule update --init --recursive --depth 1
+          test "$(git -C "$src" rev-parse HEAD)" = "$EXPECTED_TVM_COMMIT"
+          test "$(git -C "$src/3rdparty/tvm-ffi" rev-parse HEAD)" = "$EXPECTED_FFI_COMMIT"
+          build="$RUNNER_TEMP/tvm-build"
+          mkdir -p "$build"
+          # The host driver is intentionally absent. The SDK stub is link-only.
+          docker run --rm --entrypoint bash \
+            -v "$src:/src:ro" -v "$build:/build" "$CUDA_DEVEL_IMAGE" -euc '
+              apt-get update
+              apt-get install -y --no-install-recommends cmake ninja-build build-essential python3
+              cmake -S /src -B /build -G Ninja \
+                -DCMAKE_BUILD_TYPE=Release -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DUSE_LLVM=OFF -DUSE_CUDA=ON \
+                -DUSE_GTEST=OFF -DCMAKE_CUDA_ARCHITECTURES=87 \
+                -DCUDA_CUDA_LIBRARY=/usr/local/cuda/lib64/stubs/libcuda.so
+              cmake --build /build --target tvm_runtime tvm_runtime_cuda --parallel 2
+              mkdir -p /build/cuda-lib /build/cuda-driver-stubs
+              cp -L /usr/local/cuda/lib64/libcudart.so.13 /build/cuda-lib/
+              cp -L /usr/local/cuda/lib64/stubs/libcuda.so /build/cuda-driver-stubs/libcuda.so.1
+            '
+          sudo chown -R "$(id -u):$(id -g)" "$build"
+          for library in libtvm_runtime.so libtvm_ffi.so libtvm_runtime_cuda.so; do
+            machine="$(readelf -h "$build/lib/$library" | sed -n 's/^ *Machine: *//p')"
+            if [ "$machine" != "${{ matrix.elf_machine }}" ]; then
+              echo "::error::$library was built for '$machine', expected '${{ matrix.elf_machine }}'"
+              exit 1
+            fi
+          done
+          for library in "$build"/lib/*.so; do
+            if readelf -d "$library" | grep -E '(RPATH|RUNPATH).*stubs'; then
+              echo "::error::runtime library embeds a driver stub search path"
+              exit 1
+            fi
+          done
+          readelf -d "$build/lib/libtvm_runtime_cuda.so" | grep -F '[libcuda.so.1]'
+          readelf -d "$build/lib/libtvm_runtime_cuda.so" | grep -F '[libcudart.so.13]'
+          {
+            echo "TVM_SRC=$src"
+            echo "TVM_BUILD=$build"
+            echo "TVM_GIT_COMMIT=$EXPECTED_TVM_COMMIT"
+            echo "TVM_FFI_GIT_COMMIT=$EXPECTED_FFI_COMMIT"
+          } >> "$GITHUB_ENV"
+
+      - name: Stage the image build context
+        run: |
+          ctx="$RUNNER_TEMP/ctx"
+          ffi="$TVM_SRC/3rdparty/tvm-ffi"
+          mkdir -p "$ctx/tvm-include/tvm-ffi" "$ctx/tvm-include/dlpack" "$ctx/tvm-lib"
+          cp -r "$ffi/include/." "$ctx/tvm-include/tvm-ffi/"
+          cp -r "$ffi/3rdparty/dlpack/include/." "$ctx/tvm-include/dlpack/"
+          cp "$TVM_BUILD/lib/libtvm_ffi.so" "$TVM_BUILD/lib/libtvm_runtime.so" "$TVM_BUILD/lib/libtvm_runtime_cuda.so" "$ctx/tvm-lib/"
+          cp -r "$TVM_BUILD/cuda-lib" "$TVM_BUILD/cuda-driver-stubs" "$ctx/"
+          cp "$TVM_BUILD/CMakeCache.txt" "$ctx/cuda-CMakeCache.txt"
+          strip --strip-debug "$ctx"/tvm-lib/*.so
+          rsync -a --exclude .git --exclude test --exclude images \
+            --exclude /.bin --exclude /.cuda-build --exclude /.cache \
+            --exclude venv --exclude .venv --exclude node_modules "$GITHUB_WORKSPACE/" "$ctx/src/"
+          cp images/tvm/Dockerfile.cuda "$ctx/Dockerfile"
+          cp images/tvm/entrypoint.sh images/tvm/entrypoint.cuda.sh "$ctx/"
+          python3 - "$ctx" <<'PY'
+          import datetime
+          import hashlib
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          target = Path(sys.argv[1])
+          run_url = "{}/{}/actions/runs/{}".format(
+              os.environ["GITHUB_SERVER_URL"], os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_RUN_ID"]
+          )
+          manifest = {
+              "schema_version": 1,
+              "compiled_backends": ["cpu", "cuda"],
+              "cuda_version": "13.2.1",
+              "cuda_build": {
+                  "tvm_git_commit": os.environ["TVM_GIT_COMMIT"],
+                  "tvm_ffi_git_commit": os.environ["TVM_FFI_GIT_COMMIT"],
+                  "build_target": "tvm_runtime_cuda",
+                  "cuda_version": "13.2.1",
+                  "cmake_cache_sha256": hashlib.sha256((target / "cuda-CMakeCache.txt").read_bytes()).hexdigest(),
+                  "library_sha256": hashlib.sha256((target / "tvm-lib/libtvm_runtime_cuda.so").read_bytes()).hexdigest(),
+              },
+              "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              "platform": os.environ["PLATFORM"],
+              "source_repository": os.environ["GITHUB_REPOSITORY"],
+              "source_git_commit": os.environ["GITHUB_SHA"],
+              "image_tag": os.environ["IMAGE_TAG"],
+              "tvm_version": os.environ["TVM_VERSION"],
+              "tvm_git_commit": os.environ["TVM_GIT_COMMIT"],
+              "tvm_ffi_version": os.environ["TVM_FFI_VERSION"],
+              "tvm_ffi_git_commit": os.environ["TVM_FFI_GIT_COMMIT"],
+              "libraries_from": "apache/tvm v{} runtime, built by this workflow".format(os.environ["TVM_VERSION"]),
+              "build_run": run_url,
+              "libraries": {
+                  lib.name: hashlib.sha256(lib.read_bytes()).hexdigest()
+                  for lib in sorted((target / "tvm-lib").glob("*.so"))
+              },
+          }
+          (target / "provenance.json").write_text(json.dumps(manifest, indent=2) + "\n")
+          print(json.dumps(manifest, indent=2))
+          PY
+          echo "CTX=$ctx" >> "$GITHUB_ENV"
+
+      - name: Build image
+        run: |
+          docker build --platform "$PLATFORM" -t "$REF" \
+            --build-arg "TVM_VERSION=$TVM_VERSION" \
+            --build-arg "TVM_GIT_COMMIT=$TVM_GIT_COMMIT" \
+            --build-arg "TVM_FFI_VERSION=$TVM_FFI_VERSION" \
+            --build-arg "TVM_FFI_GIT_COMMIT=$TVM_FFI_GIT_COMMIT" \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.digitalhub.source.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.description=$DESCRIPTION" \
+            "$CTX"
+          actual="$(docker image inspect -f '{{.Os}}/{{.Architecture}}' "$REF")"
+          if [ "$actual" = "linux/arm" ]; then
+            actual="$actual/$(docker image inspect -f '{{.Variant}}' "$REF")"
+          fi
+          if [ "$actual" != "$PLATFORM" ]; then
+            echo "::error::built $actual instead of $PLATFORM"
+            exit 1
+          fi
+          for library in libtvm_runtime.so libtvm_ffi.so libtvm_runtime_cuda.so; do
+            want="$(sha256sum "$CTX/tvm-lib/$library" | cut -d' ' -f1)"
+            got="$(docker run --rm --platform "$PLATFORM" --entrypoint /usr/bin/sha256sum "$REF" "/opt/tvm/lib/$library" | cut -d' ' -f1)"
+            if [ "$want" != "$got" ]; then
+              echo "::error::$library in $REF differs from the one built here"
+              exit 1
+            fi
+          done
+
+      - name: Record validation limits
+        run: |
+          echo "CPU runtime/transport tests and CUDA backend/no-GPU rejection run in Dockerfile.cuda." >> "$GITHUB_STEP_SUMMARY"
+          echo "Actual NVIDIA GPU inference: NOT_RUN (hosted runners have no GPU)." >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cuda-validation-${{ matrix.arch }}
+          path: ${{ runner.temp }}/ctx/provenance.json
+          if-no-files-found: error
+
+      - name: Push image and save its digest
+        if: inputs.publish
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          python3 images/tvm/check-image-tag.py "$REF"
+          docker push "$REF"
+          docker image inspect --format '{{json .RepoDigests}}' "$REF" > repo-digests.json
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          pattern = re.escape(os.environ["IMAGE"]) + r"@sha256:[0-9a-f]{64}"
+          digests = [value for value in json.loads(Path("repo-digests.json").read_text())
+                     if re.fullmatch(pattern, value)]
+          if len(digests) != 1:
+              raise SystemExit("Expected one pushed digest for " + os.environ["IMAGE"])
+          Path("digests").mkdir(exist_ok=True)
+          Path("digests", os.environ["ARCH"] + ".txt").write_text(digests[0] + "\n")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: inputs.publish
+        with:
+          name: image-digest-${{ matrix.arch }}
+          path: digests/${{ matrix.arch }}.txt
+          overwrite: true
+          if-no-files-found: error
+
+  manifest:
+    if: inputs.publish
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ needs.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: image-digest-*
+          merge-multiple: true
+          path: digests
+
+      - name: Publish the multi-arch tag
+        run: |
+          python3 images/tvm/check-image-tag.py "$IMAGE:$TAG"
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          image = os.environ["IMAGE"]
+          source = os.environ["GITHUB_SERVER_URL"] + "/" + os.environ["GITHUB_REPOSITORY"]
+          expected = {
+              "org.opencontainers.image.source": source,
+              "org.digitalhub.source.revision": os.environ["GITHUB_SHA"],
+              "org.opencontainers.image.version": os.environ["TVM_VERSION"],
+              "org.digitalhub.tvm-ffi.version": os.environ["TVM_FFI_VERSION"],
+              "org.digitalhub.tvm.backends": "cpu,cuda",
+              "org.digitalhub.cuda.version": "13.2.1",
+          }
+          revisions = None
+          digests = []
+          for arch, platform in [("amd64", "linux/amd64"), ("arm64", "linux/arm64")]:
+              digest = Path("digests", arch + ".txt").read_text().strip()
+              if not re.fullmatch(re.escape(image) + r"@sha256:[0-9a-f]{64}", digest):
+                  raise SystemExit(f"Invalid digest for {arch}")
+              config = json.loads(subprocess.check_output([
+                  "docker", "buildx", "imagetools", "inspect", "--format", "{{json .Image}}", digest
+              ], text=True))
+              actual = config.get("os", "") + "/" + config.get("architecture", "")
+              if config.get("architecture") == "arm":
+                  actual += "/" + config.get("variant", "")
+              if actual != platform:
+                  raise SystemExit(f"{arch}: expected {platform}, got {actual}")
+              labels = config.get("config", {}).get("Labels", {})
+              for key, value in expected.items():
+                  if labels.get(key) != value:
+                      raise SystemExit(f"{arch}: unexpected {key}: {labels.get(key)!r}")
+              current = [labels.get(key, "") for key in (
+                  "org.opencontainers.image.revision", "org.digitalhub.tvm-ffi.revision"
+              )]
+              if not all(re.fullmatch(r"[0-9a-f]{40}", revision) for revision in current):
+                  raise SystemExit(f"{arch}: missing or invalid TVM/FFI revision")
+              if revisions is not None and current != revisions:
+                  raise SystemExit(f"{arch}: TVM/FFI revisions differ between architectures")
+              revisions = current
+              digests.append(digest)
+          subprocess.run([
+              "docker", "buildx", "imagetools", "create", "-t", image + ":" + os.environ["TAG"],
+              "--annotation", "index:org.opencontainers.image.source=" + source,
+              "--annotation", "index:org.opencontainers.image.description=" + os.environ["DESCRIPTION"],
+              "--annotation", "index:org.digitalhub.source.revision=" + os.environ["GITHUB_SHA"],
+              *digests,
+          ], check=True)
+          PY
+          docker buildx imagetools inspect --raw "$IMAGE:$TAG" > index.json
+          python3 - index.json <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          index = json.load(open(sys.argv[1]))
+          platforms = sorted(
+              "{}/{}".format(m["platform"]["os"], m["platform"]["architecture"])
+              + ("/" + m["platform"]["variant"] if m["platform"]["architecture"] == "arm" else "")
+              for m in index.get("manifests", [])
+              if m.get("platform", {}).get("os") != "unknown"
+          )
+          print("platforms:", platforms)
+          expected = {arch: Path("digests", arch + ".txt").read_text().strip().split("@", 1)[1]
+                      for arch in ("amd64", "arm64")}
+          actual = {
+              m["platform"]["architecture"]: m["digest"]
+              for m in index.get("manifests", []) if m.get("platform", {}).get("os") == "linux"
+          }
+          if actual != expected:
+              raise SystemExit("Published index does not match the architecture digests")
+          sys.exit(0 if platforms == ["linux/amd64", "linux/arm64"] else 1)
+          PY
+          {
+            echo "### Published \`$IMAGE:$TAG\` (linux/amd64, linux/arm64)"
+            echo ""
+            echo "On the first publish make the package public: organization → Packages → ${IMAGE##*/} → Package settings."
+          } >> "$GITHUB_STEP_SUMMARY"
