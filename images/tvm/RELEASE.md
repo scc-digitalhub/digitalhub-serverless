@@ -25,12 +25,12 @@ commit, the build-recipe commit and the upstream TVM/FFI revisions. Existing
 image tags cannot be overwritten. Updating these images does not change CORE's
 configured image references automatically.
 
-The same workflow supports manual execution, including the first build of an
-existing source tag whose original commit predates these release workflows:
+The same workflow supports manual execution for a source tag containing its
+dependency configuration and CUDA support:
 
 ```bash
 gh workflow run tvm-runtime-go-image.yml --ref main \
-  -f release_tag=0.16.1 -f publish=true
+  -f release_tag='<new-project-tag>' -f publish=true
 ```
 
 The workflow recipe is taken from the selected ref; the source is resolved from
@@ -48,5 +48,7 @@ CPU and CUDA artifacts have separate names.
 
 Only the TVM workflow responds to project tag pushes. The existing non-TVM image
 workflows continue to run when a GitHub Release is published; they are unchanged.
-For an older source tag, the Go source is checked out separately from the updated
-TVM build recipes. Native tests and the Docker build use that source checkout.
+The Go source is checked out separately from the workflow's TVM build recipes.
+Native tests and the Docker build use that source checkout. The historical
+`0.16.1` source tag predates CUDA support and cannot produce CUDA images. Keep
+that tag unchanged and use a new project release containing the CUDA code.

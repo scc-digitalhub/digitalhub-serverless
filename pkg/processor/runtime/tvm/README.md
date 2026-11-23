@@ -258,26 +258,22 @@ and runs one inference at a time; parallelism comes from the number of workers.
 
 ## Versions and release
 
-The current published runtime image is `0.26.0-r3`, built with Apache TVM `0.26.0`.
-The workflow `.github/workflows/tvm-runtime-go-image.yml` can publish the current
-`main` with separate TVM and image versions. Choose a new, unused image tag for
-the next release, then run it manually from GitHub Actions, or replace
-`<new-image-tag>` below:
+Pushing a project release tag `X.Y.Z` starts `.github/workflows/tvm-runtime-go-image.yml`.
+It builds CPU and CUDA images from that source tag. Image tags combine the project
+release and the versions pinned in `images/tvm/release-images.json`.
+For manual publication of an existing project tag containing that configuration:
 
 ```bash
 gh workflow run tvm-runtime-go-image.yml --repo scc-digitalhub/digitalhub-serverless --ref main \
-  -f tvm_version=0.26.0 -f image_tag='<new-image-tag>'
+  -f release_tag='<new-project-tag>' -f publish=true
 ```
 
-`tvm_version` selects Apache TVM and its bundled FFI. `image_tag` names this runtime
-release and can change independently of TVM `0.26.0`. Use a new image
-tag for each release; image tags do not determine model compatibility. Manual runs
-accept only `main`, and all architecture jobs check out the exact commit selected
-when the run starts. Pushing to `main` alone does not publish an image.
-
-The legacy flow remains: pushing `tvm-X.Y.Z` (or `tvm-X.Y`) builds that Git tag and
-publishes `:X.Y.Z` (or `:X.Y`, using TVM `X.Y.0`). **Do not create a GitHub Release
-for these tags**: releases of this repository publish its other runtimes.
+Use a new project tag for changed sources. Existing image tags cannot be
+overwritten, and older images such as `0.26.0-r3` remain available. Pushing to
+`main` alone does not publish images. GitHub Releases still trigger the other
+runtime image workflows; the TVM workflow responds directly to the Git tag push.
+See the [TVM image release guide](../../../../images/tvm/RELEASE.md) for tag naming,
+source verification and manifest recovery.
 
 For each of `amd64`, `arm64` and `armv7`, the workflow builds the TVM runtime and
 processor, verifies the platform and packaged library hashes, and pushes
@@ -292,10 +288,9 @@ versions and commits, library hashes and workflow run. The image label
 `org.digitalhub.source.revision` identifies the Go source commit; the existing TVM
 revision label continues to identify Apache TVM.
 
-CUDA has a separate manual workflow, `tvm-runtime-go-cuda-image.yml`, covering
-AMD64/ARM64 and a distinct CUDA image package/tag. It accepts publication from
-`main` only. These development instructions publish no CUDA release and retain
-the existing CPU tags.
+The release workflow also invokes `tvm-runtime-go-cuda-image.yml` for AMD64/ARM64,
+using a distinct CUDA image package/tag. The historical source tag `0.16.1` does
+not contain CUDA support; a new project release is required for CUDA images.
 
 ## Development
 
