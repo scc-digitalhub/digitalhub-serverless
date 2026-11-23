@@ -1,0 +1,9 @@
+{
+  "tvm_version": "0.26.0",
+  "ffi_version": "0.1.13.post2",
+  "tvm_commit": "c7b458e946bc4266915da582457476bdcd9705ae",
+  "ffi_commit": "12dbf053b3d9ba4ebd9da3123b1aeca79cf74229",
+  "cuda_version": "13.2.1",
+  "legacy_release_tag": "0.16.1",
+  "legacy_source_sha": "70b8bd4b7e985aef65d426e902a238ab8b06b40e"
+}

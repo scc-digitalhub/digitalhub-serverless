@@ -1,65 +1,67 @@
-# Separate opt-in CUDA publication. Existing CPU image tags are never touched.
-name: tvm-runtime-go CUDA image
+# Builds the exact source release selected by the TVM release workflow.
+name: tvm-runtime-go cuda build
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
-      image_tag:
-        description: New CUDA image tag (must include cuda13.2.1)
-        required: true
-        default: "0.26.0-cuda13.2.1-r1"
+      release_tag:
         type: string
-      publish:
-        description: Publish the validated CUDA image (main only)
         required: true
-        default: false
+      source_sha:
+        type: string
+        required: true
+      image_tag:
+        type: string
+        required: true
+      tvm_version:
+        type: string
+        required: true
+      ffi_version:
+        type: string
+        required: true
+      tvm_commit:
+        type: string
+        required: true
+      ffi_commit:
+        type: string
+        required: true
+      publish:
         type: boolean
-
-concurrency:
-  group: ${{ github.workflow }}-${{ inputs.image_tag }}
-  cancel-in-progress: false
+        default: false
+      manifest_run_id:
+        type: string
+        default: ''
+    outputs:
+      image_ref:
+        description: Verified multi-architecture image digest
+        value: ${{ jobs.manifest.outputs.image_ref }}
 
 permissions:
   contents: read
   packages: write
+  actions: read
 
 env:
   IMAGE: ghcr.io/scc-digitalhub/tvm-runtime-go-cuda
   DESCRIPTION: "Nuclio processor with optional CUDA TVM runtime (OpenInference v2 REST and gRPC)"
-  TVM_VERSION: "0.26.0"
-  TVM_FFI_VERSION: "0.1.13.post2"
-  EXPECTED_TVM_COMMIT: c7b458e946bc4266915da582457476bdcd9705ae
-  EXPECTED_FFI_COMMIT: 12dbf053b3d9ba4ebd9da3123b1aeca79cf74229
   CUDA_DEVEL_IMAGE: nvidia/cuda:13.2.1-devel-ubuntu24.04@sha256:44a9504c6dfb50b1241464241b02a93871928f373de6f5a644cf5fe9f080aa63
+  RELEASE_VERSION: ${{ inputs.release_tag }}
+  SOURCE_SHA: ${{ inputs.source_sha }}
+  IMAGE_TAG: ${{ inputs.image_tag }}
+  TVM_VERSION: ${{ inputs.tvm_version }}
+  TVM_FFI_VERSION: ${{ inputs.ffi_version }}
+  TVM_GIT_COMMIT: ${{ inputs.tvm_commit }}
+  TVM_FFI_GIT_COMMIT: ${{ inputs.ffi_commit }}
+  EXPECTED_TVM_COMMIT: ${{ inputs.tvm_commit }}
+  EXPECTED_FFI_COMMIT: ${{ inputs.ffi_commit }}
 
 defaults:
   run:
     shell: bash
 
 jobs:
-  version:
-    runs-on: ubuntu-24.04
-    outputs:
-      tag: ${{ steps.v.outputs.tag }}
-    steps:
-      - name: Validate CUDA publication
-        id: v
-        env:
-          INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
-          PUBLISH: ${{ inputs.publish }}
-        run: |
-          if [ "$PUBLISH" = true ] && [ "$GITHUB_REF" != refs/heads/main ]; then
-            echo "::error::publishing must run from main; use publish=false for branch validation"
-            exit 1
-          fi
-          if [[ ! "$INPUT_IMAGE_TAG" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,121}$ || ! "$INPUT_IMAGE_TAG" =~ (^|[-_.])cuda13[.]2[.]1($|[-_]) ]]; then
-            echo "::error::image_tag must be a Docker tag including cuda13.2.1 (at most 122 characters)"
-            exit 1
-          fi
-          echo "tag=$INPUT_IMAGE_TAG" >> "$GITHUB_OUTPUT"
-
   build:
-    needs: version
+    if: inputs.manifest_run_id == ''
     strategy:
       fail-fast: false
       matrix:
@@ -75,13 +77,17 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     env:
-      IMAGE_TAG: ${{ needs.version.outputs.tag }}
-      REF: ghcr.io/scc-digitalhub/tvm-runtime-go-cuda:${{ needs.version.outputs.tag }}-${{ matrix.arch }}
+      IMAGE_TAG: ${{ inputs.image_tag }}
+      REF: ghcr.io/scc-digitalhub/tvm-runtime-go-cuda:${{ inputs.image_tag }}-${{ matrix.arch }}
       PLATFORM: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: release-source
 
       - name: Log in to ghcr.io
         if: inputs.publish
@@ -153,7 +159,7 @@ jobs:
           strip --strip-debug "$ctx"/tvm-lib/*.so
           rsync -a --exclude .git --exclude test --exclude images \
             --exclude /.bin --exclude /.cuda-build --exclude /.cache \
-            --exclude venv --exclude .venv --exclude node_modules "$GITHUB_WORKSPACE/" "$ctx/src/"
+            --exclude venv --exclude .venv --exclude node_modules "$GITHUB_WORKSPACE/release-source/" "$ctx/src/"
           cp images/tvm/Dockerfile.cuda "$ctx/Dockerfile"
           cp images/tvm/entrypoint.sh images/tvm/entrypoint.cuda.sh "$ctx/"
           python3 - "$ctx" <<'PY'
@@ -183,7 +189,9 @@ jobs:
               "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
               "platform": os.environ["PLATFORM"],
               "source_repository": os.environ["GITHUB_REPOSITORY"],
-              "source_git_commit": os.environ["GITHUB_SHA"],
+              "source_git_commit": os.environ["SOURCE_SHA"],
+              "release_version": os.environ["RELEASE_VERSION"],
+              "build_recipe_git_commit": os.environ["GITHUB_SHA"],
               "image_tag": os.environ["IMAGE_TAG"],
               "tvm_version": os.environ["TVM_VERSION"],
               "tvm_git_commit": os.environ["TVM_GIT_COMMIT"],
@@ -209,7 +217,9 @@ jobs:
             --build-arg "TVM_FFI_VERSION=$TVM_FFI_VERSION" \
             --build-arg "TVM_FFI_GIT_COMMIT=$TVM_FFI_GIT_COMMIT" \
             --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
-            --label "org.digitalhub.source.revision=$GITHUB_SHA" \
+            --label "org.digitalhub.source.revision=$SOURCE_SHA" \
+            --label "org.digitalhub.release.version=$RELEASE_VERSION" \
+            --label "org.digitalhub.build.revision=$GITHUB_SHA" \
             --label "org.opencontainers.image.description=$DESCRIPTION" \
             "$CTX"
           actual="$(docker image inspect -f '{{.Os}}/{{.Architecture}}' "$REF")"
@@ -266,115 +276,37 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: inputs.publish
         with:
-          name: image-digest-${{ matrix.arch }}
+          name: cuda-image-digest-${{ matrix.arch }}
           path: digests/${{ matrix.arch }}.txt
           overwrite: true
           if-no-files-found: error
 
   manifest:
-    if: inputs.publish
-    needs: [version, build]
+    needs: build
+    if: ${{ always() && inputs.publish && (needs.build.result == 'success' || inputs.manifest_run_id != '') }}
     runs-on: ubuntu-24.04
-    env:
-      TAG: ${{ needs.version.outputs.tag }}
+    outputs:
+      image_ref: ${{ steps.publish.outputs.image_ref }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-      - name: Log in to ghcr.io
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
       - uses: docker/setup-buildx-action@v3
-
       - uses: actions/download-artifact@v4
         with:
-          pattern: image-digest-*
-          merge-multiple: true
+          pattern: cuda-image-digest-*
           path: digests
-
-      - name: Publish the multi-arch tag
+          merge-multiple: true
+          run-id: ${{ inputs.manifest_run_id || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify and publish exact image digests
+        id: publish
         run: |
-          python3 images/tvm/check-image-tag.py "$IMAGE:$TAG"
-          python3 - <<'PY'
-          import json
-          import os
-          import re
-          import subprocess
-          from pathlib import Path
-
-          image = os.environ["IMAGE"]
-          source = os.environ["GITHUB_SERVER_URL"] + "/" + os.environ["GITHUB_REPOSITORY"]
-          expected = {
-              "org.opencontainers.image.source": source,
-              "org.digitalhub.source.revision": os.environ["GITHUB_SHA"],
-              "org.opencontainers.image.version": os.environ["TVM_VERSION"],
-              "org.digitalhub.tvm-ffi.version": os.environ["TVM_FFI_VERSION"],
-              "org.digitalhub.tvm.backends": "cpu,cuda",
-              "org.digitalhub.cuda.version": "13.2.1",
-          }
-          revisions = None
-          digests = []
-          for arch, platform in [("amd64", "linux/amd64"), ("arm64", "linux/arm64")]:
-              digest = Path("digests", arch + ".txt").read_text().strip()
-              if not re.fullmatch(re.escape(image) + r"@sha256:[0-9a-f]{64}", digest):
-                  raise SystemExit(f"Invalid digest for {arch}")
-              config = json.loads(subprocess.check_output([
-                  "docker", "buildx", "imagetools", "inspect", "--format", "{{json .Image}}", digest
-              ], text=True))
-              actual = config.get("os", "") + "/" + config.get("architecture", "")
-              if config.get("architecture") == "arm":
-                  actual += "/" + config.get("variant", "")
-              if actual != platform:
-                  raise SystemExit(f"{arch}: expected {platform}, got {actual}")
-              labels = config.get("config", {}).get("Labels", {})
-              for key, value in expected.items():
-                  if labels.get(key) != value:
-                      raise SystemExit(f"{arch}: unexpected {key}: {labels.get(key)!r}")
-              current = [labels.get(key, "") for key in (
-                  "org.opencontainers.image.revision", "org.digitalhub.tvm-ffi.revision"
-              )]
-              if not all(re.fullmatch(r"[0-9a-f]{40}", revision) for revision in current):
-                  raise SystemExit(f"{arch}: missing or invalid TVM/FFI revision")
-              if revisions is not None and current != revisions:
-                  raise SystemExit(f"{arch}: TVM/FFI revisions differ between architectures")
-              revisions = current
-              digests.append(digest)
-          # Provenance is already checked in each image's labels; Docker lists do not support annotations.
-          subprocess.run([
-              "docker", "buildx", "imagetools", "create", "-t", image + ":" + os.environ["TAG"],
-              *digests,
-          ], check=True)
-          PY
-          docker buildx imagetools inspect --raw "$IMAGE:$TAG" > index.json
-          python3 - index.json <<'PY'
-          import json
-          import sys
-          from pathlib import Path
-
-          index = json.load(open(sys.argv[1]))
-          platforms = sorted(
-              "{}/{}".format(m["platform"]["os"], m["platform"]["architecture"])
-              + ("/" + m["platform"]["variant"] if m["platform"]["architecture"] == "arm" else "")
-              for m in index.get("manifests", [])
-              if m.get("platform", {}).get("os") != "unknown"
-          )
-          print("platforms:", platforms)
-          expected = {arch: Path("digests", arch + ".txt").read_text().strip().split("@", 1)[1]
-                      for arch in ("amd64", "arm64")}
-          actual = {
-              m["platform"]["architecture"]: m["digest"]
-              for m in index.get("manifests", []) if m.get("platform", {}).get("os") == "linux"
-          }
-          if actual != expected:
-              raise SystemExit("Published index does not match the architecture digests")
-          sys.exit(0 if platforms == ["linux/amd64", "linux/arm64"] else 1)
-          PY
-          {
-            echo "### Published \`$IMAGE:$TAG\` (linux/amd64, linux/arm64)"
-            echo ""
-            echo "On the first publish make the package public: organization → Packages → ${IMAGE##*/} → Package settings."
-          } >> "$GITHUB_STEP_SUMMARY"
+          python3 images/tvm/release-images.py manifest --release "$RELEASE_VERSION" \
+            --source-sha "$SOURCE_SHA" --backend cuda --image "$IMAGE" \
+            --tag "$IMAGE_TAG" --architectures amd64,arm64 --publish
