@@ -299,7 +299,7 @@ the existing CPU tags.
 
 ## Development
 
-Tests and builds need the headers and libraries of a local build of the same Apache TVM
+Builds need the headers and libraries of a local build of the same Apache TVM
 release:
 
 ```bash
@@ -307,28 +307,13 @@ TVM=~/tvm/src/tvm-0.26.0
 export CGO_ENABLED=1
 export CGO_CFLAGS="-I$TVM/3rdparty/tvm-ffi/include -I$TVM/3rdparty/tvm-ffi/3rdparty/dlpack/include"
 export CGO_LDFLAGS="-L$TVM/build/lib -Wl,-rpath,$TVM/build/lib"
-
-go test ./pkg/processor/runtime/tvm/... ./pkg/processor/trigger/openinference/...
 ```
 
 A processor built without the TVM version and commit refuses every model; the image sets
 them with
 `-ldflags "-X .../runtime/tvm.runtimeTVMVersion=<version> -X .../runtime/tvm.runtimeTVMGitCommit=<commit>"`.
 
-Manual CUDA builds and tests add `-tags cuda` and use matching CUDA-enabled TVM
-libraries. On real NVIDIA hardware, `TVM_TEST_MODEL` can select a compiled FP32
-`[4]` fixture returning `x + 1`, and `TVM_TEST_BACKEND=cuda` selects its CUDA backend:
-
-```bash
-TVM_TEST_MODEL=/path/to/cuda-model.so TVM_TEST_BACKEND=cuda \
-  go test -tags cuda ./pkg/processor/runtime/tvm/tvmrelax -run TestFP32Model -v
-```
-
-The test checks repeated outputs and handle lifetimes. Run the corresponding LLVM
-fixture with `TVM_TEST_BACKEND=llvm` for CPU comparison. Missing fixtures are skipped,
-not GPU passes. `TVM_TEST_CUDA_UNAVAILABLE=1` enables the missing-device check in a
-CUDA build; an isolated driver stub may support that test process only. Never use
-stubs for real inference or copy them into the runtime image.
+Manual CUDA builds add `-tags cuda` and use matching CUDA-enabled TVM libraries.
 
 ## Limitations
 
