@@ -343,11 +343,9 @@ jobs:
                   raise SystemExit(f"{arch}: TVM/FFI revisions differ between architectures")
               revisions = current
               digests.append(digest)
+          # Provenance is already checked in each image's labels; Docker lists do not support annotations.
           subprocess.run([
               "docker", "buildx", "imagetools", "create", "-t", image + ":" + os.environ["TAG"],
-              "--annotation", "index:org.opencontainers.image.source=" + source,
-              "--annotation", "index:org.opencontainers.image.description=" + os.environ["DESCRIPTION"],
-              "--annotation", "index:org.digitalhub.source.revision=" + os.environ["GITHUB_SHA"],
               *digests,
           ], check=True)
           PY
